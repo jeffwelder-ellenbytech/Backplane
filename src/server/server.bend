@@ -118,6 +118,7 @@ import ../core/port.bend as PT
 import ../core/clipath.bend as CPA
 import ../core/tailnet.bend as TN
 import ../core/images.bend as IM
+import ./fget.bend as FGH
 import ../core/range.bend as BRANGE
 import ../core/links.bend as LK
 import ../core/attach.bend as ATT
@@ -258,6 +259,8 @@ type Msg is Data:
   # who holds a lock's flock outside the hub, as Guard.who printed it
   LockSaw{name: String, holder: String, out: String}
   LockHttp{op: String, body: String, reply: Chan(String)}
+  # the folder GET /download serves for a thread ("" for none: Hub.files.root)
+  FilesRoot{thread: String, reply: Chan(String)}
   Announce{text: String}
   Mcp{thread: String, body: String, reply: Chan(String)}
   # a request on the MCP route arrived, its answer was written (the open
@@ -6370,13 +6373,30 @@ def Conn.view.mode(view: String, +mobile: String, +frontend: String) -> String:
     case "1": Bool.pick(String, Bool.and(String.eq(mobile, "1"), Bool.not(String.eq(frontend, "1"))), "view-mobile", Bool.pick(String, Bool.and(String.eq(frontend, "1"), Bool.not(String.eq(mobile, "1"))), "view-web", "view-invalid"))
     case _: PRESENT.Session.mode(mobile, frontend)
 
+# GET /download (src/server/fget.bend): the thread's folder comes from the
+# hub's log, so it asks the hub (FilesRoot); bulk reads take a credential as
+# /message-image does
+def FilesRoot.ask(+inbox: Chan(Msg), +thread: String) -> IO(String):
+  do IO<String>:
+    +reply : Chan(String) <- Chan.new(String, 1)
+    sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, FilesRoot{thread, reply})
+    m : Maybe<&1, String> <- Chan.recv(String, reply)
+    return Maybe.default(&1, String, m, "")
+
+def Conn.download(dl: Bool, s: Socket, +web: String, +p: String, +hs: List<&2, W.Header>, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+  match dl:
+    case True{}:
+      FGH.FgetHTTP.serve(Bool.and(Conn.allowed(hs, p, token), AUTH.Auth.credential(hs, p, token)), s, ATT.Att.from_uri("file://" ++ W.Http.param(p, "thread")), ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")), t => FilesRoot.ask(inbox, t))
+    case False{}:
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json", "/message-image"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Bool.and(Conn.allowed(hs, p, token), Bool.or(Bool.not(String.eq(W.Http.route(p), "/message-image")), AUTH.Auth.credential(hs, p, token))), W.Http.header_of(hs, "range"))
+
 def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match ws req:
     case True{} W.Request{_, +p, +hs}:
       Conn.gate(Conn.allowed(hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json", "/message-image"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Bool.and(Conn.allowed(hs, p, token), Bool.or(Bool.not(String.eq(W.Http.route(p), "/message-image")), AUTH.Auth.credential(hs, p, token))), W.Http.header_of(hs, "range"))
+      Conn.download(String.eq(W.Http.route(p), "/download"), s, web, p, hs, inbox, token)
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:
@@ -18095,6 +18115,8 @@ def Msg.kind(m: Msg) -> String:
       "lock_saw"
     case LockHttp{_, _, _}:
       "lock_http"
+    case FilesRoot{_, _}:
+      "files_root"
     case AgentWrite{_, _, _}:
       "agent_write"
     case UpdateCheck{}:
@@ -18775,6 +18797,26 @@ def Hub.lock.http.valid(valid: Bool, h: Hub, +op: String, +a: J.Json, +reply: Ch
         r : Hub & Bool <- Hub.step.ok(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Locks.http.step(op, st, now, name, holder, J.Json.get_str(a, "note", ""), ready))
         h2 : Hub <- Hub.lock.http.done(r, name, holder, lost, reply)
         LockTool.cleanup(h2, name, holder)
+
+# the folder GET /download serves for a thread: its worktree, else its
+# project's root while the project is not removed; "" for a thread the log
+# does not know (src/server/fget.bend, core/fmget.bend)
+def Hub.files.root.t(+st: M.State, t: M.Thread) -> String:
+  match t:
+    case M.Thread{_, +project, _, _, _, _, _, _, _, _, _, _, _, _, +worktree, _, _, _, _, _, _}:
+      Bool.pick(String, String.is_empty(worktree), B.Hub.project.home_root(B.Hub.project(st, project)), worktree)
+
+def Hub.files.root.k(known: Bool, +st: M.State, +thread: String) -> String:
+  match known:
+    case True{}: Hub.files.root.t(st, B.Hub.thread(st, thread))
+    case False{}: ""
+
+def Hub.files.root(h: Hub, +thread: String, +reply: Chan(String)) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        ok : Result<&1, &1, String, Unit> <- Chan.send(String, reply, Hub.files.root.k(B.Hub.owns(st, thread), st, thread))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 def Hub.lock.http(h: Hub, +op: String, +body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   +a = Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{})
@@ -19472,6 +19514,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.lock.saw(h, name, holder, out, now)
     case LockHttp{op, body, reply}:
       Hub.lock.http(h, op, body, reply, now)
+    case FilesRoot{thread, reply}:
+      Hub.files.root(h, thread, reply)
     case AgentWrite{thread, line, gen}:
       Hub.agent_write(h, thread, line, gen)
     case UpdateCheck{}:

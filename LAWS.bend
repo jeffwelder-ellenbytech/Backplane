@@ -295,6 +295,8 @@ import ./src/core/onboard.bend as OBD
 
 import ./src/core/fm.bend as FMG
 
+import ./src/core/fmget.bend as FGET
+
 import ./src/core/acp.bend as AC
 
 import ./src/core/msp.bend as MSP
@@ -15972,3 +15974,76 @@ law timeline_follow_grown_viewport_away:
   for +held: TLVIRTUAL.Px
   for end: TLVIRTUAL.Px
   {TLVIRTUAL.Follow.choose(TLVIRTUAL.Follow.allowed(True{}, TLVIRTUAL.End.at(TLVIRTUAL.Px.int(1000n), TLVIRTUAL.Px.int(400n), TLVIRTUAL.Follow.viewport(TLVIRTUAL.Px.int(200n), TLVIRTUAL.Px.int(400n)))), held, end) == held : TLVIRTUAL.Px}
+
+# Files tab downloads (core/fmget.bend): the URL a client links to names
+# the thread and never a folder, which requests the hub runs, what of its
+# own home it will not serve, the saved name, the header-safe name, and
+# the zip folder the hub removes
+law fget_url_names_thread:
+  {FGET.Fget.url("t1", "hw/a&b") == "/download?thread=t1&path=hw/a%26b" : String}
+
+law fget_url_no_root:
+  {String.contains(FGET.Fget.url("t1", "hw"), "root=") == False{} : Bool}
+
+law fget_ok_down:
+  {FGET.Fget.ok("t1", "hw/main") == True{} : Bool}
+
+law fget_ok_up:
+  {FGET.Fget.ok("t1", "hw/../../etc") == False{} : Bool}
+
+law fget_ok_absolute:
+  {FGET.Fget.ok("t1", "/etc") == False{} : Bool}
+
+law fget_ok_no_thread:
+  {FGET.Fget.ok("", "hw") == False{} : Bool}
+
+law fget_ok_elsewhere:
+  {FGET.Fget.ok("m1~t1", "hw") == False{} : Bool}
+
+law fget_ok_line_break:
+  {FGET.Fget.ok("t1", "hw\nx") == False{} : Bool}
+
+law fget_refused_unknown:
+  {FGET.Fget.refused("/h/.bp", "") == "no such thread" : String}
+
+law fget_refused_home:
+  {FGET.Fget.refused("/h/.bp", "/h/.bp") == "inside Backplane's home" : String}
+
+law fget_refused_secrets:
+  {FGET.Fget.refused("/h/.bp", "/h/.bp/secrets") == "inside Backplane's home" : String}
+
+law fget_refused_scratch_folder:
+  {FGET.Fget.refused("/h/.bp", "/h/.bp/scratch") == "inside Backplane's home" : String}
+
+law fget_served_scratch_thread:
+  {FGET.Fget.refused("/h/.bp", "/h/.bp/scratch/t1") == "" : String}
+
+law fget_served_beside_home:
+  {FGET.Fget.refused("/h/.bp", "/h/.bp2/board") == "" : String}
+
+law fget_served_project:
+  {FGET.Fget.refused("/h/.bp", "/w/board") == "" : String}
+
+law fget_name_root:
+  {FGET.Fget.name("/w/board", "", True{}) == "board.zip" : String}
+
+law fget_name_folder:
+  {FGET.Fget.name("/w/board", "hw/main/", True{}) == "main.zip" : String}
+
+law fget_name_file:
+  {FGET.Fget.name("/w/board", "hw/x.kicad_pcb", False{}) == "x.kicad_pcb" : String}
+
+law fget_ascii_header_safe:
+  {FGET.Fget.ascii("a\"b\r\nc\\d") == "a_b__c_d" : String}
+
+law fget_tmp_made:
+  {FGET.Fget.tmp("/h/zips", "/h/zips/z.AB12cd/out.zip") == "/h/zips/z.AB12cd" : String}
+
+law fget_tmp_elsewhere:
+  {FGET.Fget.tmp("/h/zips", "/w/board/out.zip") == "" : String}
+
+law fget_tmp_deeper:
+  {FGET.Fget.tmp("/h/zips", "/h/zips/z.a/b/out.zip") == "" : String}
+
+law fget_tmp_unnamed:
+  {FGET.Fget.tmp("/h/zips", "/h/zips/z./out.zip") == "" : String}

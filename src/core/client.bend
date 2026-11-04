@@ -59,6 +59,7 @@ import ./apikeys.bend as AK
 import ./agy.bend as AGY
 import ./diff.bend as DF
 import ./fm.bend as FM
+import ./fmget.bend as FGET
 import ./onboard.bend as OB
 import ./provider-setup.bend as PS
 import ./telemetry.bend as TLM
@@ -6093,6 +6094,27 @@ def Fm.top(+u: Ui) -> Nat:
 # an open file's name, for the image and PDF views' heads
 def Fm.name(+u: Ui) -> String:
   FM.Fm.last(Ui.view_get(u, "view.path"))
+
+def Fm.get.k(none: Bool, +thread: String, +rel: String) -> String:
+  match none:
+    case True{}: ""
+    case False{}: FGET.Fget.url(thread, rel)
+
+# where a client downloads a folder (as a zip) or a file of the selected
+# thread's folder, by its path from there (core/fmget.bend's GET /download:
+# the hub finds the folder from the thread, the request never names one);
+# "" for a thread elsewhere (FGET.Fget.ok) or a project's own page
+def Fm.get(+u: Ui, +rel: String) -> String:
+  Fm.get.k(Bool.or(PH.Home.is(Ui.sel(u)), Bool.not(FGET.Fget.ok(Ui.sel(u), rel))), Ui.sel(u), rel)
+
+# the folder on show as a zip
+def Fm.get.here(+u: Ui) -> String:
+  Fm.get(u, Fm.dir(u))
+
+# the name a download is saved under (a folder's with ".zip"), for the
+# phones, which save it themselves
+def Fm.get.name(+u: Ui, +rel: String, zip: Bool) -> String:
+  FGET.Fget.name(Ui.root(u), rel, zip)
 
 # Mech opened (Mpage.open marks "@mech.to3d:<t>"; it shows at once what
 # the parts last listed give, and asks for them again, Mpage.sync): once

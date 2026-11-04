@@ -15802,3 +15802,72 @@ def Laws.home_viewer_size_is_local(u, value):
 def Laws.timeline_follow_grown_viewport(held, end): {==}
 
 def Laws.timeline_follow_grown_viewport_away(held, end): {==}
+
+def Laws.fget_url_names_thread():
+  {==}
+
+def Laws.fget_url_no_root():
+  {==}
+
+def Laws.fget_ok_down():
+  {==}
+
+def Laws.fget_ok_up():
+  {==}
+
+def Laws.fget_ok_absolute():
+  {==}
+
+def Laws.fget_ok_no_thread():
+  {==}
+
+def Laws.fget_ok_elsewhere():
+  {==}
+
+def Laws.fget_ok_line_break():
+  {==}
+
+def Laws.fget_refused_unknown():
+  {==}
+
+def Laws.fget_refused_home():
+  {==}
+
+def Laws.fget_refused_secrets():
+  {==}
+
+def Laws.fget_refused_scratch_folder():
+  {==}
+
+def Laws.fget_served_scratch_thread():
+  {==}
+
+def Laws.fget_served_beside_home():
+  {==}
+
+def Laws.fget_served_project():
+  {==}
+
+def Laws.fget_name_root():
+  {==}
+
+def Laws.fget_name_folder():
+  {==}
+
+def Laws.fget_name_file():
+  {==}
+
+def Laws.fget_ascii_header_safe():
+  {==}
+
+def Laws.fget_tmp_made():
+  {==}
+
+def Laws.fget_tmp_elsewhere():
+  {==}
+
+def Laws.fget_tmp_deeper():
+  {==}
+
+def Laws.fget_tmp_unnamed():
+  {==}
