@@ -7409,6 +7409,57 @@ def Laws.fm_parent_down():
 def Laws.fm_join_root():
   {==}
 
+def Laws.fm_zip_skips_git():
+  {==}
+
+def Laws.fm_zip_skips_history():
+  {==}
+
+def Laws.fm_zip_skips_worktrees():
+  {==}
+
+def Laws.fm_zip_keeps_checklist():
+  {==}
+
+def Laws.fm_zip_skips_backups():
+  {==}
+
+def Laws.fm_zip_skips_locks():
+  {==}
+
+def Laws.fm_zip_skips_modules():
+  {==}
+
+def Laws.fm_zip_keeps_board():
+  {==}
+
+def Laws.fm_zip_keeps_lookalike():
+  {==}
+
+def Laws.fm_zip_name_root():
+  {==}
+
+def Laws.fm_zip_name_folder():
+  {==}
+
+def Laws.fm_zip_top_never_up():
+  {==}
+
+def Laws.fm_zip_top_one_name():
+  {==}
+
+def Laws.fm_zip_url_encodes():
+  {==}
+
+def Laws.fm_get_url_encodes():
+  {==}
+
+def Laws.fm_zip_disposition():
+  {==}
+
+def Laws.fm_zip_disposition_one_line():
+  {==}
+
 def Laws.emb_summary_round():
   {==}
 

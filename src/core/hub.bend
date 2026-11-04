@@ -2951,6 +2951,24 @@ def Hub.thread_project(t: M.Thread) -> String:
     case M.Thread{_, p, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
       p
 
+def Hub.project.title(p: M.Project) -> String:
+  match p:
+    case M.Project{_, t, _, _, _}:
+      t
+
+def Hub.files.of.k(home: Bool, +s: M.State, +id: String) -> String:
+  match home:
+    case True{}:
+      Hub.project.home_root(Hub.project(s, PH.Home.project(id))) ++ "\n" ++ Hub.project.title(Hub.project(s, PH.Home.project(id)))
+    case False{}:
+      Hub.cwd(s, Hub.thread(s, id)) ++ "\n" ++ Hub.project.title(Hub.project(s, Hub.thread_project(Hub.thread(s, id))))
+
+# what a download from the Files tab reads (server.bend's FilesHttp): the
+# folder files.dir lists for the thread (Hub.cwd), or a project home's
+# folder, then a newline and the project's title; "" first when neither
+def Hub.files.of(+s: M.State, +id: String) -> String:
+  Hub.files.of.k(PH.Home.is(id), s, id)
+
 # the worktree made again from a thread's kept branch
 # A thread's worktree folder found missing at its agent's start (removed
 # outside the hub, or by an older hub under a thread sharing it) is made again

@@ -6148,6 +6148,19 @@ def Fm.top(+u: Ui) -> Nat:
 def Fm.name(+u: Ui) -> String:
   FM.Fm.last(Ui.view_get(u, "view.path"))
 
+def Fm.down.k(none: Bool, +url: String) -> String:
+  match none:
+    case True{}: ""
+    case False{}: url
+
+# where a Files entry downloads from (core/fm.bend's Fm.zip.url for a
+# folder, Fm.get.url for a file; the folder on show is dir "" from its
+# root): "" with no thread, and on a thread elsewhere, whose files are
+# another hub's (its listing is that hub's; this hub holds only a cache)
+def Fm.down(+u: Ui, +folder: Bool, +rel: String) -> String:
+  Fm.down.k(Bool.or(String.is_empty(Ui.sel(u)), FR.Fr.is(Ui.sel(u))),
+    Bool.pick(String, folder, FM.Fm.zip.url(Ui.sel(u), rel), FM.Fm.get.url(Ui.sel(u), rel)))
+
 # Mech opened (Mpage.open marks "@mech.to3d:<t>"; it shows at once what
 # the parts last listed give, and asks for them again, Mpage.sync): once
 # the fresh listing is in, the thread's viewer shows what it gives

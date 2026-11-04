@@ -235,6 +235,9 @@ function start() {
   ses.setPermissionRequestHandler((wc, permission, callback, details) => callback(permitted(wc, permission, details.requestingUrl, details, 'request')));
   ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => permitted(wc, permission, requestingOrigin, details));
   require('./improvements-display-capture.cjs').installDisplayCapture({ electron, session: ses, getWindow: () => window, origin: () => origin });
+  // the Files tab's downloads go to Downloads, from this hub or a remote one
+  require('./downloads.cjs').installDownloads(ses, { origin: () => origin, downloads: () => app.getPath('downloads'),
+    onDone: (state, file) => { if (state === 'completed') app.dock?.downloadFinished?.(file); } });
   try { recordingStore.prune(); } catch {}
   const recordingCleanup = setInterval(() => { try { recordingStore.prune(); } catch {} }, 15 * 60 * 1000);recordingCleanup.unref();
   ses.webRequest.onHeadersReceived((details, callback) => {

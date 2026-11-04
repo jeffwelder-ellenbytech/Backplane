@@ -1,5 +1,6 @@
 import Base
 import ./diff.bend as DF
+import ./utf8.bend as U8
 
 # The viewer's Files tab (pure): a thread's project folder listed a folder
 # at a time (the hub's files.dir: "d|f <tab> size <tab> name" lines, folders
@@ -135,3 +136,103 @@ def Fm.size(+n: Nat) -> String:
 # the folder's name as a trail shows it ("Project" for the root)
 def Fm.title(+dir: String) -> String:
   Bool.pick(String, String.is_empty(dir), "Project", Fm.last(dir))
+
+# Downloads (laws fm_zip_*, fm_get_*): a file downloads as itself, a folder
+# as <name>.zip, from the hub's /files/get and /files/zip (server.bend's
+# FilesHttp.*), each named by the thread and a path from its folder's root
+# (Fm.safe). A zip leaves out what is never the design: git's and the
+# hub's own history, the threads' worktrees (each a copy of the project), KiCad's backup folders, autosaves and locks,
+# node_modules, caches. The rules are data the hub's zip writer reads
+# (host.js's host_zip_skip), each a kind and a text: "=" a name, "*" the
+# end of a name, "^" the start of a name, "/" a path from the root.
+def Fm.zip.rules() -> List<&2, String>:
+  ["=.git", "=node_modules", "=.DS_Store", "=__pycache__", "*-backups", "*.lck", "^_autosave-", "/.backplane/history.git", "/.backplane/worktrees"]
+
+def Fm.zip.rule(+r: String, +p: String) -> Bool:
+  Bool.pick(Bool, String.starts_with(r, "="), String.eq(Fm.last(p), String.drop(r, 1n)),
+    Bool.pick(Bool, String.starts_with(r, "*"), String.ends_with(Fm.last(p), String.drop(r, 1n)),
+      Bool.pick(Bool, String.starts_with(r, "^"), String.starts_with(Fm.last(p), String.drop(r, 1n)),
+        Bool.and(String.starts_with(r, "/"), String.eq(p, String.drop(r, 1n))))))
+
+def Fm.zip.any(rs: List<&2, String>, +p: String) -> Bool:
+  match rs:
+    case Nil{}:
+      False{}
+    case +r <> t:
+      Bool.or(Fm.zip.rule(r, p), Fm.zip.any(t, p))
+
+# whether a zip leaves an entry out (p: its path from the project's root)
+def Fm.zip.skip(+p: String) -> Bool:
+  Fm.zip.any(Fm.zip.rules(), p)
+
+def Fm.zip.char(+c: U32) -> U32:
+  Bool.pick(U32, Bool.or(U32.is_lt(c, 32), Bool.or(U32.is_eq(c, 47), Bool.or(U32.is_eq(c, 92), U32.is_eq(c, 58)))), 95, c)
+
+def Fm.zip.clean.go(s: String) -> String:
+  match s:
+    case SNil{}:
+      SNil{}
+    case SCon{Chr{+c}, t}:
+      SCon{Chr{Fm.zip.char(c)}, Fm.zip.clean.go(t)}
+
+def Fm.zip.clean.k(+n: String) -> String:
+  Bool.pick(String, Bool.or(String.is_empty(n), Bool.or(String.eq(n, "."), String.eq(n, ".."))), "project", n)
+
+# the folder a zip holds everything in: the folder's name, or the
+# project's title for its root; one name, never "." or ".."
+def Fm.zip.top(+title: String, +dir: String) -> String:
+  Fm.zip.clean.k(Fm.zip.clean.go(Bool.pick(String, String.is_empty(dir), title, Fm.last(dir))))
+
+# the name a folder downloads as
+def Fm.zip.name(+title: String, +dir: String) -> String:
+  Fm.zip.top(title, dir) ++ ".zip"
+
+def Fm.hex(+n: U32) -> Char:
+  Chr{U32.add(n, Bool.pick(U32, U32.is_lt(n, 10), 48, 55))}
+
+# a byte kept as it is: letters, digits, - . _ ~ (and / where slash)
+def Fm.plain(+slash: Bool, +c: U32) -> Bool:
+  Bool.or(Bool.or(Bool.and(U32.is_ge(c, 48), U32.is_le(c, 57)), Bool.and(U32.is_ge(c, 65), U32.is_le(c, 90))),
+    Bool.or(Bool.and(U32.is_ge(c, 97), U32.is_le(c, 122)), Bool.or(Bool.or(U32.is_eq(c, 45), U32.is_eq(c, 46)), Bool.or(Bool.or(U32.is_eq(c, 95), U32.is_eq(c, 126)), Bool.and(slash, U32.is_eq(c, 47))))))
+
+def Fm.pct.k(ok: Bool, +c: U32, rest: String) -> String:
+  match ok:
+    case True{}:
+      SCon{Chr{c}, rest}
+    case False{}:
+      SCon{'%', SCon{Fm.hex(U32.shrn(c, 4n)), SCon{Fm.hex(U32.and(c, 15)), rest}}}
+
+def Fm.pct.go(bs: List<&2, U32>, +slash: Bool) -> String:
+  match bs:
+    case Nil{}:
+      SNil{}
+    case +b <> t:
+      Fm.pct.k(Fm.plain(slash, b), b, Fm.pct.go(t, slash))
+
+# a text percent-encoded as UTF-8 (a path keeps its slashes)
+def Fm.pct(+slash: Bool, +s: String) -> String:
+  Fm.pct.go(U8.Utf8.encode(s), slash)
+
+# where a folder of a thread's project downloads as a zip
+def Fm.zip.url(+thread: String, +dir: String) -> String:
+  "/files/zip?thread=" ++ Fm.pct(False{}, thread) ++ "&path=" ++ Fm.pct(True{}, dir)
+
+# where one of its files downloads
+def Fm.get.url(+thread: String, +path: String) -> String:
+  "/files/get?thread=" ++ Fm.pct(False{}, thread) ++ "&path=" ++ Fm.pct(True{}, path)
+
+def Fm.ascii.c(+c: U32) -> U32:
+  Bool.pick(U32, Bool.or(Bool.or(U32.is_lt(c, 32), U32.is_gt(c, 126)), Bool.or(U32.is_eq(c, 34), Bool.or(U32.is_eq(c, 92), U32.is_eq(c, 37)))), 95, c)
+
+def Fm.ascii.go(s: String) -> String:
+  match s:
+    case SNil{}:
+      SNil{}
+    case SCon{Chr{+c}, t}:
+      SCon{Chr{Fm.ascii.c(c)}, Fm.ascii.go(t)}
+
+# the Content-Disposition a download goes with: the name as ASCII for old
+# browsers (anything else, quotes and controls made "_"), and exactly as
+# UTF-8 (RFC 5987); one header line whatever the name holds
+def Fm.disposition(+name: String) -> String:
+  "attachment; filename=\"" ++ Fm.ascii.go(name) ++ "\"; filename*=UTF-8''" ++ Fm.pct(False{}, name)

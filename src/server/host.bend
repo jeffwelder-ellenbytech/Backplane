@@ -87,6 +87,25 @@ def Sock.send_path(sock: Socket, path: String, start: U32, len: U32) ->
   IO(Socket & Result<&1, &1, U32 & String, Unit>):
   import "./effects/host.js"
 
+# A Files download (server.bend's FilesHttp; the caller owns authorization
+# and Fm.safe): the file at rel in the folder root, as an attachment with
+# the given Content-Disposition, any type, a single range as send_preview.
+# A path that leaves root through a symlink, or is not a regular file, is
+# 404. Read and sent 64 KiB at a time.
+def Sock.send_download(sock: Socket, root: String, rel: String, disposition: String, range: String) ->
+  IO(Socket & Result<&1, &1, U32 & String, Unit>):
+  import "./effects/host.js"
+
+# The folder at rel in root as a ZIP (chunked, never whole in memory: a
+# file a piece at a time, deflated, with data descriptors, ZIP64 past 4 GB
+# or 65535 entries), every entry under the folder top/. Symlinks and
+# anything not a file or a folder are left out, and so is any entry whose
+# path from root core/fm.bend's rules name (Fm.zip.rules, the same data
+# Fm.zip.skip reads).
+def Sock.send_zip(sock: Socket, root: String, rel: String, top: String, disposition: String, rules: List<&2, String>) ->
+  IO(Socket & Result<&1, &1, U32 & String, Unit>):
+  import "./effects/host.js"
+
 # send_bytes with one deadline (ms) for all of it: a peer that stops
 # reading fails it (ETIMEDOUT) and the socket is shut both ways
 def Sock.send_until(sock: Socket, data: List<&2, U32>, ms: U32) ->

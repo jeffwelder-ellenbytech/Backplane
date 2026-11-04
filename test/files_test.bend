@@ -22,6 +22,10 @@ def ui(a: U.Act) -> U.Ui:
 def base() -> U.Ui:
   ui(U.Ui.act(U.Ui.fold(log(), U.Ui.init(10n)), "select", "t1"))
 
+# a thread elsewhere (another machine's, core/far.bend) selected
+def far() -> U.Ui:
+  ui(U.Ui.act(U.Ui.fold(List.append(&2, M.Change, log(), [M.ThreadCreated{"l1~t9", "p1", "Far", M.Local{}, "", "", "claude", "", 3n}]), U.Ui.init(10n)), "select", "l1~t9"))
+
 def crumbs(ps: List<&2, U.PItem>) -> List<&2, String>:
   match ps:
     case Nil{}:
@@ -103,3 +107,17 @@ def main() -> IO(Unit):
     C.Check.str("a PDF asks for its first page", sent(U.Ui.act(base(), "fm-open", "docs/ds.pdf")), "{\"id\":1,\"m\":\"pdf.page\",\"p\":{\"path\":\"/w/board/docs/ds.pdf\",\"page\":\"1\"}}")
     C.Check.str("a text file opens its preview", U.Ui.view_get(act(base(), "fm-open", "notes.txt"), "view.kind"), "text")
     C.Check.str("sizes", String.join([FM.Fm.size(0n), FM.Fm.size(1500n), FM.Fm.size(3500000n), FM.Fm.size(2147483648n)], "|"), "0 B|1 KB|3.3 MB|2.0 GB")
+    # downloads (core/fm.bend's Fm.zip.*, Fm.get.url; client.bend's Fm.down)
+    C.Check.str("the folder on show zips from the thread", U.Fm.down(base(), True{}, ""), "/files/zip?thread=t1&path=")
+    C.Check.str("a folder below zips by its path", U.Fm.down(base(), True{}, "mfg/gerbers"), "/files/zip?thread=t1&path=mfg/gerbers")
+    C.Check.str("a file downloads by its path", U.Fm.down(base(), False{}, "docs/a b.pdf"), "/files/get?thread=t1&path=docs/a%20b.pdf")
+    C.Check.str("nothing selected downloads nothing", U.Fm.down(U.Ui.fold(log(), U.Ui.init(10n)), True{}, ""), "")
+    C.Check.str("a thread elsewhere downloads nothing here", U.Ui.sel(far()) ++ ":" ++ U.Fm.down(far(), False{}, "a.txt"), "l1~t9:")
+    C.Check.str("what a zip leaves out", String.join([Bool.show(FM.Fm.zip.skip(".git")), Bool.show(FM.Fm.zip.skip("a/node_modules")), Bool.show(FM.Fm.zip.skip("ecc83-backups")),
+      Bool.show(FM.Fm.zip.skip("_autosave-ecc83.kicad_sch")), Bool.show(FM.Fm.zip.skip("~x.kicad_pcb.lck")), Bool.show(FM.Fm.zip.skip(".backplane/history.git")), Bool.show(FM.Fm.zip.skip(".DS_Store")), Bool.show(FM.Fm.zip.skip(".backplane/worktrees"))], "|"),
+      "True|True|True|True|True|True|True|True")
+    C.Check.str("what a zip keeps", String.join([Bool.show(FM.Fm.zip.skip("boards/ecc83-pp.kicad_pcb")), Bool.show(FM.Fm.zip.skip(".backplane.json")), Bool.show(FM.Fm.zip.skip("sub/.backplane/history.git")),
+      Bool.show(FM.Fm.zip.skip("docs/history.git")), Bool.show(FM.Fm.zip.skip("a.gitignore")), Bool.show(FM.Fm.zip.skip("fp-info-cache"))], "|"),
+      "False|False|False|False|False|False")
+    C.Check.str("zip names", String.join([FM.Fm.zip.name("ecc83", ""), FM.Fm.zip.name("ecc83", "mfg"), FM.Fm.zip.name("", ""), FM.Fm.zip.name("x", "a/."), FM.Fm.zip.name("Ünï", "")], "|"), "ecc83.zip|mfg.zip|project.zip|project.zip|Ünï.zip")
+    C.Check.str("a non-ASCII attachment name", FM.Fm.disposition("schéma.pdf"), "attachment; filename=\"sch_ma.pdf\"; filename*=UTF-8''sch%C3%A9ma.pdf")

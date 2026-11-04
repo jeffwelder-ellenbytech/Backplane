@@ -5322,6 +5322,67 @@ law fm_parent_down:
 law fm_join_root:
   {FMG.Fm.join("", "hw") == "hw" : String}
 
+# Downloads from the Files tab: a zip leaves out git, the hub's own
+# history, KiCad's backups and locks, and keeps the design and its notes
+law fm_zip_skips_git:
+  {FMG.Fm.zip.skip("boards/.git") == True{} : Bool}
+
+law fm_zip_skips_history:
+  {FMG.Fm.zip.skip(".backplane/history.git") == True{} : Bool}
+
+# the threads' worktrees are copies of the project: a zip of it holds one
+law fm_zip_skips_worktrees:
+  {FMG.Fm.zip.skip(".backplane/worktrees") == True{} : Bool}
+
+law fm_zip_keeps_checklist:
+  {FMG.Fm.zip.skip(".backplane/checklist.md") == False{} : Bool}
+
+law fm_zip_skips_backups:
+  {FMG.Fm.zip.skip("boards/ecc83-backups") == True{} : Bool}
+
+law fm_zip_skips_locks:
+  {FMG.Fm.zip.skip("~ecc83-pp.kicad_sch.lck") == True{} : Bool}
+
+law fm_zip_skips_modules:
+  {FMG.Fm.zip.skip("tools/node_modules") == True{} : Bool}
+
+law fm_zip_keeps_board:
+  {FMG.Fm.zip.skip("boards/ecc83-pp.kicad_pcb") == False{} : Bool}
+
+# a git folder named only like one is kept (a rule is a whole name)
+law fm_zip_keeps_lookalike:
+  {FMG.Fm.zip.skip("docs/.github") == False{} : Bool}
+
+# the zip is named for the folder, or for the project at its root
+law fm_zip_name_root:
+  {FMG.Fm.zip.name("ecc83", "") == "ecc83.zip" : String}
+
+law fm_zip_name_folder:
+  {FMG.Fm.zip.name("ecc83", "mfg/gerbers") == "gerbers.zip" : String}
+
+# its folder is one name, never one that climbs out where it is unpacked
+law fm_zip_top_never_up:
+  {FMG.Fm.zip.top("..", "") == "project" : String}
+
+law fm_zip_top_one_name:
+  {FMG.Fm.zip.top("a/b:c", "") == "a_b_c" : String}
+
+# the addresses: thread and path percent-encoded as UTF-8, the path's
+# slashes kept
+law fm_zip_url_encodes:
+  {FMG.Fm.zip.url("t 1", "docs/a b") == "/files/zip?thread=t%201&path=docs/a%20b" : String}
+
+law fm_get_url_encodes:
+  {FMG.Fm.get.url("t1", "docs/é&x.txt") == "/files/get?thread=t1&path=docs/%C3%A9%26x.txt" : String}
+
+# the attachment's name: ASCII for old browsers, exact as RFC 5987 UTF-8,
+# and one header line whatever the name holds
+law fm_zip_disposition:
+  {FMG.Fm.disposition("é \"x\".zip") == "attachment; filename=\"_ _x_.zip\"; filename*=UTF-8''%C3%A9%20%22x%22.zip" : String}
+
+law fm_zip_disposition_one_line:
+  {FMG.Fm.disposition("a\r\nb") == "attachment; filename=\"a__b\"; filename*=UTF-8''a%0D%0Ab" : String}
+
 # Terminals in the chat (core/emb.bend)
 # -------------------------------------
 

@@ -245,6 +245,9 @@ type Msg is Data:
   # who holds a lock's flock outside the hub, as Guard.who printed it
   LockSaw{name: String, holder: String, out: String}
   LockHttp{op: String, body: String, reply: Chan(String)}
+  # a Files download asks where a thread's folder is (core/hub.bend's
+  # Hub.files.of: "<folder>\n<project title>")
+  FilesRoot{thread: String, reply: Chan(String)}
   Announce{text: String}
   Mcp{thread: String, body: String, reply: Chan(String)}
   # a request on the MCP route arrived, its answer was written (the open
@@ -6305,7 +6308,63 @@ def Info.serve(allowed: Bool, s: Socket, +h: String) -> IO(Unit):
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
-def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, +coding: U32, +allowed: Bool, +range: String) -> IO(Unit):
+# Downloads from the Files tab (core/fm.bend's Fm.zip.*, Fm.get.url):
+# GET /files/zip?thread=<id>&path=<folder> streams the folder as a zip,
+# GET /files/get?thread=<id>&path=<file> one file as an attachment, for a
+# client the hub lets in. The path is from the thread's folder (Fm.safe),
+# which the hub names (core/hub.bend's Hub.files.of), and the effect keeps
+# it there (no symlink is followed out of it: host.js's host_files_inside).
+def FilesHttp.send(zip: Bool, s: Socket, +root: String, +title: String, +rel: String, range: String) -> IO(Unit):
+  match zip:
+    case True{}:
+      do IO<Unit>:
+        sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_zip(s, root, rel, FMP.Fm.zip.top(title, rel), FMP.Fm.disposition(FMP.Fm.zip.name(title, rel)), FMP.Fm.zip.rules())
+        s2 : Socket <- Conn.sent(sent)
+        Socket.close(s2)
+    case False{}:
+      do IO<Unit>:
+        sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_download(s, root, rel, FMP.Fm.disposition(FMP.Fm.last(rel)), range)
+        s2 : Socket <- Conn.sent(sent)
+        Socket.close(s2)
+
+def FilesHttp.found.k(none: Bool, zip: Bool, s: Socket, +root: String, +title: String, +rel: String, range: String) -> IO(Unit):
+  match none:
+    case True{}:
+      Conn.finish(s, W.Http.text("404 Not Found", "no such thread"))
+    case False{}:
+      FilesHttp.send(zip, s, root, title, rel, range)
+
+def FilesHttp.found(+text: String, zip: Bool, s: Socket, +rel: String, range: String) -> IO(Unit):
+  +root = Maybe.default(&2, String, List.head(&2, String, String.split(text, '\n')), "")
+  FilesHttp.found.k(String.is_empty(root), zip, s, root, String.drop(text, 1n+String.length(root)), rel, range)
+
+def FilesHttp.got(m: Maybe<&1, String>, zip: Bool, s: Socket, +rel: String, range: String) -> IO(Unit):
+  match m:
+    case Some{+text}:
+      FilesHttp.found(text, zip, s, rel, range)
+    case None{}:
+      Conn.finish(s, W.Http.text("503 Service Unavailable", "the hub did not answer"))
+
+def FilesHttp.safe(ok: Bool, zip: Bool, s: Socket, +thread: String, +rel: String, range: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match ok:
+    case False{}:
+      Conn.finish(s, W.Http.text("400 Bad Request", "that path is not in this project"))
+    case True{}:
+      do IO<Unit>:
+        +reply : Chan(String) <- Chan.new(String, 1)
+        sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, FilesRoot{thread, reply})
+        m : Maybe<&1, String> <- Chan.recv(String, reply)
+        FilesHttp.got(m, zip, s, rel, range)
+
+def FilesHttp.serve(allowed: Bool, zip: Bool, s: Socket, +p: String, range: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match allowed:
+    case False{}:
+      Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
+    case True{}:
+      FilesHttp.safe(FMP.Fm.safe(ATT.Att.from_uri("file://" ++ W.Http.param(p, "path"))), zip, s,
+        ATT.Att.from_uri("file://" ++ W.Http.param(p, "thread")), ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")), range, inbox)
+
+def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, +coding: U32, +allowed: Bool, +range: String, +inbox: Chan(Msg)) -> IO(Unit):
   match i:
     case 0n:
       Conn.get(True{}, s, web, W.Http.route(p), coding)
@@ -6325,6 +6384,10 @@ def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, +coding: U32, +allow
       DiagnosticsHTTP.serve(allowed, s)
     case 8n:
       MessageImageHTTP.serve(allowed, s, ATT.Att.from_uri("file://" ++ W.Http.param(p, "entry")), ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")))
+    case 9n:
+      FilesHttp.serve(allowed, True{}, s, p, range, inbox)
+    case 10n:
+      FilesHttp.serve(allowed, False{}, s, p, range, inbox)
     case _:
       Conn.get(False{}, s, web, W.Http.route(p), coding)
 
@@ -6339,7 +6402,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
       Conn.gate(Conn.allowed(hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json", "/message-image"], W.Http.route(p), 0n), s, web, p, H.Static.coding(W.Http.header_of(hs, "accept-encoding")), Bool.and(Conn.allowed(hs, p, token), Bool.or(Bool.not(String.eq(W.Http.route(p), "/message-image")), AUTH.Auth.credential(hs, p, token))), W.Http.header_of(hs, "range"))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json", "/message-image", "/files/zip", "/files/get"], W.Http.route(p), 0n), s, web, p, H.Static.coding(W.Http.header_of(hs, "accept-encoding")), Bool.and(Conn.allowed(hs, p, token), Bool.or(Bool.not(String.eq(W.Http.route(p), "/message-image")), AUTH.Auth.credential(hs, p, token))), W.Http.header_of(hs, "range"), inbox)
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:
@@ -18038,6 +18101,8 @@ def Msg.kind(m: Msg) -> String:
       "lock_saw"
     case LockHttp{_, _, _}:
       "lock_http"
+    case FilesRoot{_, _}:
+      "files_root"
     case AgentWrite{_, _, _}:
       "agent_write"
     case UpdateCheck{}:
@@ -18723,6 +18788,14 @@ def Hub.lock.http(h: Hub, +op: String, +body: String, +reply: Chan(String), +now
   +a = Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{})
   Hub.lock.http.valid(Bool.and(LCK.Lock.name.valid(J.Json.get_str(a, "name", "")), Bool.and(String.starts_with(J.Json.get_str(a, "holder", ""), "pid:"), M.Launch.has(["acquire", "renew", "release", "cancel", "status"], op))), h, op, a, reply, now)
 
+# where a Files download reads from (FilesHttp.*), answered at once
+def Hub.files.root(h: Hub, +thread: String, +reply: Chan(String)) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        sent : Result<&1, &1, String, Unit> <- Chan.send(String, reply, B.Hub.files.of(st, thread))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
 def Hub.mail.failed(h: Hub, +body: MB.Body, +reason: String, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Mail.failure(st, now, body, reason))
@@ -19405,6 +19478,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.lock.saw(h, name, holder, out, now)
     case LockHttp{op, body, reply}:
       Hub.lock.http(h, op, body, reply, now)
+    case FilesRoot{thread, reply}:
+      Hub.files.root(h, thread, reply)
     case AgentWrite{thread, line, gen}:
       Hub.agent_write(h, thread, line, gen)
     case UpdateCheck{}:
