@@ -28,9 +28,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DeveloperBoard
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Memory
@@ -52,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +67,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
@@ -80,7 +86,45 @@ private fun fileIcon(name: String): ImageVector = when (name) {
     "box" -> Icons.Filled.ViewInAr
     "image" -> Icons.Filled.Image
     "file-text" -> Icons.Filled.Description
+    "download" -> Icons.Filled.Download
+    "folder-down" -> Icons.Filled.FolderZip
     else -> Icons.Filled.InsertDriveFile
+}
+
+// A download from the Files tab (mobile/view.bend's Files.json: a row's
+// down, the folder's zip): the person picks where it goes (the system's
+// Create document, under the name the hub gives it), then it streams there
+// from the hub with its token. Never opened in a browser: the address
+// carries the token.
+private class Pending(val url: String, val name: String)
+
+private fun fetchInto(url: String, ctx: android.content.Context, into: android.net.Uri): Boolean = try {
+    val c = URL(url).openConnection() as HttpURLConnection
+    c.connectTimeout = 5000
+    c.readTimeout = 60000
+    try {
+        if (c.responseCode != 200) false
+        else {
+            val out = ctx.contentResolver.openOutputStream(into, "wt") ?: throw java.io.IOException("no output")
+            out.use { o -> c.inputStream.use { it.copyTo(o) } }
+            true
+        }
+    } finally {
+        c.disconnect()
+    }
+} catch (e: Exception) {
+    runCatching { android.provider.DocumentsContract.deleteDocument(ctx.contentResolver, into) }
+    false
+}
+
+@Composable
+private fun DownButton(busy: Boolean, enabled: Boolean, icon: String, tip: String, label: String? = null, onClick: () -> Unit) {
+    if (busy) CircularProgressIndicator(Modifier.padding(horizontal = 12.dp).size(18.dp), strokeWidth = 2.dp)
+    else if (label != null) TextButton(onClick = onClick, enabled = enabled) {
+        Icon(fileIcon(icon), tip, Modifier.size(18.dp))
+        Text(label, Modifier.padding(start = 6.dp))
+    }
+    else IconButton(onClick = onClick, enabled = enabled) { Icon(fileIcon(icon), tip, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.outline) }
 }
 
 // the viewer's choices (Board, Schematic, 3D, Mech, Files) and its close button
@@ -97,15 +141,43 @@ fun ViewerChoices(m: AppModel, v: Viewer) {
 @Composable
 fun FilesScreen(m: AppModel, v: Viewer, f: FilesPage) {
     val lang = LocalBackplaneLanguage.current
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()) {
-        ViewerChoices(m, v)
-        LazyRow(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            items(f.trail) { c ->
-                TextButton(onClick = { m.act(c.action, c.value) }) {
-                    Text(c.label, maxLines = 1, color = if (c == f.trail.last()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
-                }
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pending by remember { mutableStateOf<Pending?>(null) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val p = pending
+        pending = null
+        if (uri != null && p != null) {
+            busy = p.url
+            failed = false
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) { fetchInto(p.url, ctx, uri) }
+                busy = null
+                failed = !ok
             }
         }
+    }
+    val download = { path: String, name: String ->
+        m.web(path)?.let { u -> pending = Pending(u, name); save.launch(name) }
+        Unit
+    }
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()) {
+        ViewerChoices(m, v)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            LazyRow(Modifier.weight(1f).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                items(f.trail) { c ->
+                    TextButton(onClick = { m.act(c.action, c.value) }) {
+                        Text(c.label, maxLines = 1, color = if (c == f.trail.last()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
+                    }
+                }
+            }
+            if (f.ready && f.zip.isNotEmpty()) DownButton(busy == m.web(f.zip), busy == null, "folder-down", NativeMessages.files_download_tip(lang), NativeMessages.files_download(lang)) {
+                download(f.zip, f.zipName)
+            }
+        }
+        if (failed) Text(NativeMessages.files_download_failed(lang), Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
         HorizontalDivider()
         when {
             !f.ready -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -122,6 +194,10 @@ fun FilesScreen(m: AppModel, v: Viewer, f: FilesPage) {
                         Text(r.label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                             color = if (on) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
                         if (r.detail.isNotEmpty()) Text(r.detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        if (r.down.isNotEmpty()) DownButton(busy == m.web(r.down), busy == null, if (r.kind == "folder") "folder-down" else "download",
+                            if (r.kind == "folder") NativeMessages.files_download_folder(lang, r.label) else NativeMessages.files_download_file(lang, r.label)) {
+                            download(r.down, r.downName.ifEmpty { r.label })
+                        }
                     }
                 }
             }

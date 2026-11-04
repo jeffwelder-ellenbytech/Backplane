@@ -6,6 +6,7 @@ import ../src/core/client.bend as U
 import ../src/core/model.bend as M
 import ../src/core/json.bend as J
 import ../src/core/fm.bend as FM
+import ../src/core/i18n.bend as I
 
 # The viewer's Files tab (core/fm.bend, client.bend's Fm): a folder asked
 # for, listed, its rows; files opened in the view their kind takes; a PDF
@@ -53,6 +54,17 @@ def sent(a: U.Act) -> String:
 def listed(+u: U.Ui, +dir: String, +entries: String) -> U.Ui:
   U.Ui.recv(u, J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", J.Num{U.Ui.info(u, "fm.id:t1")}}, J.KV{"ok", J.Flag{True{}}},
     J.KV{"result", J.Json.obj([J.KV{"fmEntries", J.Str{entries}}, J.KV{"fmDir", J.Str{dir}}, J.KV{"fmRoot", J.Str{"/w/board"}}, J.KV{"thread", J.Str{"t1"}}])}]))
+
+# the phones' Files page over a listing (mobile/view.bend's Files.json)
+def phone() -> J.Json:
+  MV.Files.json(I.En{}, True{}, listed(act(base(), "fm", ""), "", "d\t0\tmfg\nf\t5\tnotes.txt\nf\t2\tx.lck\n"))
+
+def downs(rs: List<&2, J.Json>) -> List<&2, String>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case +r <> t:
+      (J.Json.get_str(r, "down", "") ++ " " ++ J.Json.get_str(r, "downName", "")) <> downs(t)
 
 def labels(rs: List<&2, U.FmRow>) -> List<&2, String>:
   match rs:
@@ -113,6 +125,9 @@ def main() -> IO(Unit):
     C.Check.str("a file downloads by its path", U.Fm.down(base(), False{}, "docs/a b.pdf"), "/files/get?thread=t1&path=docs/a%20b.pdf")
     C.Check.str("what a download never holds has no download", U.Fm.down(base(), False{}, "boards/_autosave-x.kicad_pcb") ++ "|" ++ U.Fm.down(base(), True{}, "boards/x-backups") ++ "|" ++ U.Fm.down(base(), False{}, ".env"), "||")
     C.Check.str("a project's other dotfiles download", U.Fm.down(base(), False{}, ".backplane.json"), "/files/get?thread=t1&path=.backplane.json")
+    C.Check.str("the phones' Files page: the folder's zip and its name", J.Json.get_str(phone(), "zip", "") ++ " " ++ J.Json.get_str(phone(), "zipName", ""), "/files/zip?thread=t1&path= board.zip")
+    C.Check.str("the phones' rows: where each downloads and its name", String.join(downs(J.Json.elems(J.Json.get_obj(phone(), "rows"))), "|"),
+      "/files/zip?thread=t1&path=mfg mfg.zip|/files/get?thread=t1&path=notes.txt notes.txt| x.lck")
     C.Check.str("nothing selected downloads nothing", U.Fm.down(U.Ui.fold(log(), U.Ui.init(10n)), True{}, ""), "")
     C.Check.str("a thread elsewhere downloads nothing here", U.Ui.sel(far()) ++ ":" ++ U.Fm.down(far(), False{}, "a.txt"), "l1~t9:")
     C.Check.str("what a zip leaves out", String.join([Bool.show(FM.Fm.zip.skip(".git")), Bool.show(FM.Fm.zip.skip("a/node_modules")), Bool.show(FM.Fm.zip.skip("ecc83-backups")),
