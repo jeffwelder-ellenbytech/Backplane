@@ -152,6 +152,18 @@ object NativeMessages {
   fun files_changed(tag: String, arg0: ULong): String =
     if (tag == "ja") ((if (arg0 == 0uL) "変更なし" else "変更ファイル" + number(arg0) + "件")) else ((if (arg0 == 0uL) "No files changed" else (if (arg0 == 1uL) number(arg0) + " file changed" else number(arg0) + " files changed")))
 
+  // files.download
+  fun files_download(tag: String): String =
+    if (tag == "ja") ("ダウンロード") else ("Download")
+
+  // files.download.file
+  fun files_download_file(tag: String): String =
+    if (tag == "ja") ("このファイルをダウンロード") else ("Download this file")
+
+  // files.download.folder
+  fun files_download_folder(tag: String): String =
+    if (tag == "ja") ("このフォルダをzipでダウンロード") else ("Download this folder as a zip")
+
   // google.client.own
   fun google_client_own(tag: String): String =
     if (tag == "ja") ("独自クライアント") else ("Own client")
@@ -323,6 +335,14 @@ object NativeMessages {
   // native.entry.viewer.short
   fun native_entry_viewer_short(tag: String): String =
     if (tag == "ja") ("ビューアーで表示") else ("Show in the viewer")
+
+  // native.file.download.failed
+  fun native_file_download_failed(tag: String): String =
+    if (tag == "ja") ("ダウンロードできませんでした。") else ("The download did not finish.")
+
+  // native.file.download.saved
+  fun native_file_download_saved(tag: String, arg0: String): String =
+    if (tag == "ja") (arg0 + "に保存しました") else ("Saved to " + arg0)
 
   // native.file.image.unsupported
   fun native_file_image_unsupported(tag: String): String =

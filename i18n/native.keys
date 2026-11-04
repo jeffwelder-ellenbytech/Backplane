@@ -102,6 +102,11 @@ common.delete
 composer.send
 viewer.files.empty
 files.back.tip
+files.download
+files.download.file
+files.download.folder
+native.file.download.failed
+native.file.download.saved
 review.reply
 review.reopen
 review.resolve

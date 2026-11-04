@@ -5190,21 +5190,37 @@ def View.fm.row.loc(+lc: I.Loc, r: U.FmRow) -> D.Node:
 def View.fm.row(r: U.FmRow) -> D.Node:
   View.fm.row.loc(I.En{}, r)
 
-def View.fm.rows.loc(+lc: I.Loc, rs: List<&2, U.FmRow>) -> List<&2, D.Node>:
+# a download (core/fmget.bend's GET /download): a plain link the browser
+# saves, a folder as a zip, a file as it is; nothing where the hub has none
+def View.fm.get.k(none: Bool, +cls: String, +href: String, +tip: String, kids: List<&2, D.Node>) -> List<&2, D.Node>:
+  match none:
+    case True{}: Nil{}
+    case False{}: [D.El{"a", "", [D.At{"class", cls}, D.At{"href", href}, D.At{"download", ""}, D.At{"title", tip}, D.At{"aria-label", tip}], kids}]
+
+def View.fm.get(+cls: String, +href: String, +tip: String, kids: List<&2, D.Node>) -> List<&2, D.Node>:
+  View.fm.get.k(String.is_empty(href), cls, href, tip, kids)
+
+def View.fm.item.loc(+lc: I.Loc, +u: U.Ui, r: U.FmRow) -> D.Node:
+  match r:
+    case U.FmRow{+l, +a, +v, +d, +k}:
+      D.El{"div", "", [D.At{"class", "fm-item"}], View.fm.row.loc(lc, U.FmRow{l, a, v, d, k}) <>
+        View.fm.get("fm-get", U.Fm.get(u, v), Bool.pick(String, String.eq(k, "folder"), MSG.T.files.download.folder(lc), MSG.T.files.download.file(lc)), [WI.WIcon.svg("download", 16)])}
+
+def View.fm.rows.loc(+lc: I.Loc, +u: U.Ui, rs: List<&2, U.FmRow>) -> List<&2, D.Node>:
   match rs:
     case Nil{}:
       Nil{}
     case r <> t:
-      View.fm.row.loc(lc, r) <> View.fm.rows.loc(lc, t)
+      View.fm.item.loc(lc, u, r) <> View.fm.rows.loc(lc, u, t)
 
-def View.fm.rows(rs: List<&2, U.FmRow>) -> List<&2, D.Node>:
-  View.fm.rows.loc(I.En{}, rs)
+def View.fm.rows(+u: U.Ui, rs: List<&2, U.FmRow>) -> List<&2, D.Node>:
+  View.fm.rows.loc(I.En{}, u, rs)
 
 def View.fm.body.loc(+lc: I.Loc, ready: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match ready:
     case True{}:
       Bool.pick(List<&2, D.Node>, String.is_empty(U.Ui.info(u, "fm.err:" ++ U.Ui.sel(u))),
-        Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.FmRow, U.Fm.rows(u)), [D.Dom.span("fm-note", MSG.T.viewer.files.empty(lc))], View.fm.rows.loc(lc, U.Fm.rows(u))),
+        Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.FmRow, U.Fm.rows(u)), [D.Dom.span("fm-note", MSG.T.viewer.files.empty(lc))], View.fm.rows.loc(lc, u, U.Fm.rows(u))),
         [D.Dom.span("fm-note", U.Ui.info(u, "fm.err:" ++ U.Ui.sel(u)))])
     case False{}:
       [D.Dom.span("fm-note", MSG.T.viewer.files.loading(lc))]
@@ -5214,7 +5230,8 @@ def View.fm.body(ready: Bool, +u: U.Ui) -> List<&2, D.Node>:
 
 def View.files(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "fm-bar"}], List.append(&2, D.Node, View.fm.trail.loc(lc, U.Fm.trail.loc(lc, u)),
-     [D.El{"span", "", [D.At{"class", "grow"}], Nil{}}, D.Dom.button("", "fm-up", "", MSG.T.files.up.tip(lc), MSG.T.queue.up(lc))])},
+     D.El{"span", "", [D.At{"class", "grow"}], Nil{}} <> List.append(&2, D.Node, View.fm.get("btn", U.Fm.get.here(u), MSG.T.files.download.folder(lc), [D.Txt{MSG.T.files.download(lc)}]),
+       [D.Dom.button("", "fm-up", "", MSG.T.files.up.tip(lc), MSG.T.queue.up(lc))]))},
    D.El{"div", "files-list", [D.At{"class", "fm-list"}], View.fm.body.loc(lc, U.Fm.ready(u), u)}]
 
 # an image or a PDF opened from the Files tab: its name, back to the folder

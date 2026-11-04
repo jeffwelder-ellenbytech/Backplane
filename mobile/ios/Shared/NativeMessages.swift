@@ -194,6 +194,21 @@ enum NativeMessages {
     tag == "ja" ? ((arg0 == 0 ? "変更なし" : "変更ファイル" + number(arg0) + "件")) : ((arg0 == 0 ? "No files changed" : (arg0 == 1 ? number(arg0) + " file changed" : number(arg0) + " files changed")))
   }
 
+  // files.download
+  static func files_download(_ tag: String) -> String {
+    tag == "ja" ? ("ダウンロード") : ("Download")
+  }
+
+  // files.download.file
+  static func files_download_file(_ tag: String) -> String {
+    tag == "ja" ? ("このファイルをダウンロード") : ("Download this file")
+  }
+
+  // files.download.folder
+  static func files_download_folder(_ tag: String) -> String {
+    tag == "ja" ? ("このフォルダをzipでダウンロード") : ("Download this folder as a zip")
+  }
+
   // google.client.own
   static func google_client_own(_ tag: String) -> String {
     tag == "ja" ? ("独自クライアント") : ("Own client")
@@ -407,6 +422,16 @@ enum NativeMessages {
   // native.entry.viewer.short
   static func native_entry_viewer_short(_ tag: String) -> String {
     tag == "ja" ? ("ビューアーで表示") : ("Show in the viewer")
+  }
+
+  // native.file.download.failed
+  static func native_file_download_failed(_ tag: String) -> String {
+    tag == "ja" ? ("ダウンロードできませんでした。") : ("The download did not finish.")
+  }
+
+  // native.file.download.saved
+  static func native_file_download_saved(_ tag: String, _ arg0: String) -> String {
+    tag == "ja" ? (arg0 + "に保存しました") : ("Saved to " + arg0)
   }
 
   // native.file.image.unsupported

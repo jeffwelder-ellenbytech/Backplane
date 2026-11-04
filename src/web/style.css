@@ -520,6 +520,12 @@ section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90de
 .fm-row.folder svg { color: var(--accent); }
 .fm-row .fm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fm-row .fm-size { color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); font-family: var(--mono); }
+.fm-item { display: flex; align-items: center; }
+.fm-item .fm-row { flex: 1; min-width: 0; }
+.fm-get { display: flex; align-items: center; color: var(--faint); padding: 6px 12px 6px 4px; text-decoration: none; }
+.fm-get:hover { color: var(--text); }
+.fm-item:hover { background: var(--raise); }
+.fm-item:hover .fm-row { background: none; }
 /* the Review tab: the report's Markdown, scrolling in the pane */
 .fm-bar .crumb.on { color: var(--text); }
 .review-pane .fm-bar .fm-file { margin-left: 10px; color: var(--dim); }

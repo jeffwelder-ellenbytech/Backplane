@@ -109,7 +109,8 @@ def Icon.all() -> List<&2, IDef>:
    IDef{"undo", [Icon.s("M9 14 4 9l5-5"), Icon.s("M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11")]},
    IDef{"bell", [Icon.s("M10.268 21a2 2 0 0 0 3.464 0"), Icon.s("M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326")]},
    IDef{"repeat", [Icon.s("m17 2 4 4-4 4"), Icon.s("M3 11v-1a4 4 0 0 1 4-4h14"), Icon.s("m7 22-4-4 4-4"), Icon.s("M21 13v1a4 4 0 0 1-4 4H3")]},
-   IDef{"user", [Icon.s("M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"), Icon.s("M8 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0")]}]
+   IDef{"user", [Icon.s("M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"), Icon.s("M8 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0")]},
+   IDef{"download", [Icon.s("M12 15V3"), Icon.s("M21 15v6H3v-6"), Icon.s("m7 10 5 5 5-5")]}]
 
 def Icon.pick(hit: Bool, ls: List<&2, Layer>, found: List<&2, Layer>) -> List<&2, Layer>:
   match hit:
@@ -144,7 +145,7 @@ def Icon.used() -> List<&2, String>:
   ["plus", "x", "chevron-down", "chevron-right", "settings", "paperclip", "arrow-up", "stop", "mic", "search", "sun", "moon",
    "play", "pause", "chevron-left", "skip-back", "skip-forward", "history", "git-compare", "message-square",
    "pin", "circle-check", "clock", "archive", "trash", "git-fork", "undo", "terminal", "panel-right", "diff",
-   "folder", "file", "file-text", "image", "circuit-board", "cpu", "box", "bell", "repeat", "square-pen", "gauge", "shopping-cart", "layout-panel-left"]
+   "folder", "file", "file-text", "image", "circuit-board", "cpu", "box", "bell", "repeat", "square-pen", "gauge", "shopping-cart", "layout-panel-left", "download"]
 
 def Icon.missing.k(none: Bool, +n: String, rest: List<&2, String>) -> List<&2, String>:
   match none:
