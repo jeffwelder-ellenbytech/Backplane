@@ -275,8 +275,11 @@ data class Viewer(
 // the Files tab: where the folder is, its rows (a tap sends action with
 // value; "" when the file is only listed), whether the hub has listed it
 data class FileCrumb(val label: String, val action: String, val value: String)
-data class FileRow(val label: String, val action: String, val value: String, val detail: String, val kind: String, val icon: String)
-data class FilesPage(val trail: List<FileCrumb>, val rows: List<FileRow>, val ready: Boolean)
+// download: where the hub serves the row to save (a folder as a zip, a file
+// as it is; "" for none), downloadName what to save it as
+data class FileRow(val label: String, val action: String, val value: String, val detail: String, val kind: String, val icon: String,
+    val download: String = "", val downloadName: String = "")
+data class FilesPage(val trail: List<FileCrumb>, val rows: List<FileRow>, val ready: Boolean, val download: String = "", val downloadName: String = "")
 // an image or a PDF from the Files tab: its name, "image" or "pdf", where
 // the hub serves it (a path the app makes a URL of, Core.web)
 data class FileView(val name: String, val kind: String, val url: String)
@@ -737,8 +740,9 @@ private fun viewer(o: JSONObject): Viewer = Viewer(
     },
     files = o.optJSONObject("files")?.let { f ->
         FilesPage(f.optJSONArray("trail").map { FileCrumb(it.optString("label"), it.optString("action"), it.optString("value")) },
-            f.optJSONArray("rows").map { FileRow(it.optString("label"), it.optString("action"), it.optString("value"), it.optString("detail"), it.optString("kind"), it.optString("icon")) },
-            f.optBoolean("ready"))
+            f.optJSONArray("rows").map { FileRow(it.optString("label"), it.optString("action"), it.optString("value"), it.optString("detail"), it.optString("kind"), it.optString("icon"),
+                it.optString("download"), it.optString("downloadName")) },
+            f.optBoolean("ready"), f.optString("download"), f.optString("downloadName"))
     },
     file = o.optJSONObject("file")?.let { FileView(it.optString("name"), it.optString("kind"), it.optString("url")) },
     review = o.optJSONObject("review")?.let { r ->

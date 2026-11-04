@@ -6,6 +6,7 @@ import ../src/core/client.bend as U
 import ../src/core/model.bend as M
 import ../src/core/json.bend as J
 import ../src/core/fm.bend as FM
+import ../src/core/i18n.bend as I
 
 # The viewer's Files tab (core/fm.bend, client.bend's Fm): a folder asked
 # for, listed, its rows; files opened in the view their kind takes; a PDF
@@ -102,4 +103,14 @@ def main() -> IO(Unit):
     C.Check.str("a model opens in 3D", U.Ui.view_get(act(base(), "fm-open", "mech/case.step"), "view.kind"), "3d")
     C.Check.str("a PDF asks for its first page", sent(U.Ui.act(base(), "fm-open", "docs/ds.pdf")), "{\"id\":1,\"m\":\"pdf.page\",\"p\":{\"path\":\"/w/board/docs/ds.pdf\",\"page\":\"1\"}}")
     C.Check.str("a text file opens its preview", U.Ui.view_get(act(base(), "fm-open", "notes.txt"), "view.kind"), "text")
+    # downloads (core/fmget.bend, client.bend's Fm.get, GET /download)
+    C.Check.str("the root downloads as a zip", U.Fm.get.here(listed(act(base(), "fm", ""), "", "")), "/download?thread=t1&path=")
+    C.Check.str("the folder on show downloads", U.Fm.get.here(act(act(base(), "fm", ""), "fm-cd", "hw/main")), "/download?thread=t1&path=hw/main")
+    C.Check.str("a file row downloads the file", U.Fm.get(base(), "hw/x y.kicad_pcb"), "/download?thread=t1&path=hw/x%20y.kicad_pcb")
+    C.Check.str("no download above the root", U.Fm.get(base(), "../etc"), "")
+    C.Check.str("the phones' rows carry the download", Bool.show(String.contains(J.Json.show(MV.Files.json(I.En{}, True{}, listed(act(base(), "fm", ""), "", "d\t0\thw\nf\t5\tnotes.txt\n"))), "\"download\":\"/download?thread=t1&path=hw\"")), "True")
+    C.Check.str("the phones save a folder as its zip", Bool.show(String.contains(J.Json.show(MV.Files.json(I.En{}, True{}, listed(act(base(), "fm", ""), "", "d\t0\thw\nf\t5\tnotes.txt\n"))), "\"downloadName\":\"hw.zip\"")), "True")
+    C.Check.str("the phones save a file as itself", Bool.show(String.contains(J.Json.show(MV.Files.json(I.En{}, True{}, listed(act(base(), "fm", ""), "", "d\t0\thw\nf\t5\tnotes.txt\n"))), "\"downloadName\":\"notes.txt\"")), "True")
+    C.Check.str("the phones save the root as the project's zip", Bool.show(String.contains(J.Json.show(MV.Files.json(I.En{}, True{}, listed(act(base(), "fm", ""), "", ""))), "\"downloadName\":\"board.zip\"")), "True")
+    C.Check.str("the phones' page carries the folder's", Bool.show(String.contains(J.Json.show(MV.Files.json(I.En{}, True{}, listed(act(base(), "fm", ""), "", ""))), "\"download\":\"/download?thread=t1&path=\"")), "True")
     C.Check.str("sizes", String.join([FM.Fm.size(0n), FM.Fm.size(1500n), FM.Fm.size(3500000n), FM.Fm.size(2147483648n)], "|"), "0 B|1 KB|3.3 MB|2.0 GB")

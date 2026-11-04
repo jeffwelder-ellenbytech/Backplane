@@ -415,14 +415,20 @@ struct FileCrumb: Decodable, Hashable {
     let label, action, value: String
 }
 
+// download: where the hub serves the row to save (a folder as a zip, a file
+// as it is; "" for none), downloadName what to save it as
 struct FileRow: Decodable, Hashable {
     let label, action, value, detail, kind, icon: String
+    let download: String?
+    let downloadName: String?
 }
 
 struct FilesPage: Decodable {
     let trail: [FileCrumb]
     let rows: [FileRow]
     let ready: Bool
+    let download: String?
+    let downloadName: String?
 }
 
 // an image or a PDF from the Files tab: its name, "image" or "pdf", where

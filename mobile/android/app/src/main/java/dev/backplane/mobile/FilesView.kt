@@ -1,6 +1,12 @@
 package dev.backplane.mobile
 
+import android.content.ContentValues
+import android.content.Context
 import android.graphics.Bitmap
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.widget.Toast
 import android.graphics.Color as AColor
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
@@ -29,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DeveloperBoard
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
@@ -51,6 +58,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,6 +70,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
@@ -94,15 +103,78 @@ fun ViewerChoices(m: AppModel, v: Viewer) {
     }
 }
 
+// A download from the Files tab (GET /download: a folder as a zip, a file
+// as it is), fetched with the hub's token by the app itself (the token never
+// goes to the system's download manager) into Downloads/Backplane, or on
+// Android 9 and older into the app's own Downloads folder. Answers where it
+// went, or null.
+private fun saveDownload(ctx: Context, url: String, name: String): String? {
+    val safe = name.replace('/', '_').ifEmpty { "download" }
+    val c = URL(url).openConnection() as HttpURLConnection
+    c.connectTimeout = 5000
+    c.readTimeout = 120000
+    try {
+        if (c.responseCode != 200) return null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val r = ctx.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, safe)
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Backplane")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val item = r.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+            try {
+                val out = r.openOutputStream(item) ?: throw java.io.IOException("no output")
+                out.use { o -> c.inputStream.use { it.copyTo(o) } }
+                r.update(item, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+                return Environment.DIRECTORY_DOWNLOADS + "/Backplane/" + safe
+            } catch (e: Exception) {
+                r.delete(item, null, null)
+                return null
+            }
+        }
+        val dir = ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return null
+        val to = File(dir, safe)
+        c.inputStream.use { i -> to.outputStream().use { i.copyTo(it) } }
+        return to.path
+    } catch (e: Exception) {
+        return null
+    } finally {
+        c.disconnect()
+    }
+}
+
 @Composable
 fun FilesScreen(m: AppModel, v: Viewer, f: FilesPage) {
     val lang = LocalBackplaneLanguage.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf("") }
+    val fetch: (String, String) -> Unit = fetch@{ path, name ->
+        val url = m.web(path) ?: return@fetch
+        if (busy.isNotEmpty()) return@fetch
+        busy = name
+        scope.launch {
+            val place = withContext(Dispatchers.IO) { saveDownload(ctx.applicationContext, url, name) }
+            busy = ""
+            Toast.makeText(ctx, if (place == null) NativeMessages.native_file_download_failed(lang) else NativeMessages.native_file_download_saved(lang, place),
+                Toast.LENGTH_SHORT).show()
+        }
+    }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()) {
         ViewerChoices(m, v)
-        LazyRow(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            items(f.trail) { c ->
-                TextButton(onClick = { m.act(c.action, c.value) }) {
-                    Text(c.label, maxLines = 1, color = if (c == f.trail.last()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            LazyRow(Modifier.weight(1f).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                items(f.trail) { c ->
+                    TextButton(onClick = { m.act(c.action, c.value) }) {
+                        Text(c.label, maxLines = 1, color = if (c == f.trail.last()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
+                    }
+                }
+            }
+            if (f.download.isNotEmpty()) {
+                if (busy.isNotEmpty()) CircularProgressIndicator(Modifier.padding(horizontal = 8.dp).size(18.dp), strokeWidth = 2.dp)
+                TextButton(onClick = { fetch(f.download, f.downloadName) }, enabled = busy.isEmpty()) {
+                    Text(NativeMessages.files_download(lang))
                 }
             }
         }
@@ -115,13 +187,22 @@ fun FilesScreen(m: AppModel, v: Viewer, f: FilesPage) {
                     val on = r.action.isNotEmpty()
                     val tint = if (r.kind == "folder") MaterialTheme.colorScheme.primary
                         else if (on) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline
-                    Row(Modifier.fillMaxWidth().then(if (on) Modifier.clickable { m.act(r.action, r.value) } else Modifier)
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Icon(fileIcon(r.icon), null, Modifier.size(20.dp), tint = tint)
-                        Text(r.label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            color = if (on) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
-                        if (r.detail.isNotEmpty()) Text(r.detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.weight(1f).then(if (on) Modifier.clickable { m.act(r.action, r.value) } else Modifier)
+                            .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = if (r.download.isEmpty()) 16.dp else 0.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Icon(fileIcon(r.icon), null, Modifier.size(20.dp), tint = tint)
+                            Text(r.label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                color = if (on) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
+                            if (r.detail.isNotEmpty()) Text(r.detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        }
+                        if (r.download.isNotEmpty()) {
+                            IconButton(onClick = { fetch(r.download, r.downloadName.ifEmpty { r.label }) }, enabled = busy.isEmpty()) {
+                                Icon(Icons.Filled.Download,
+                                    if (r.kind == "folder") NativeMessages.files_download_folder(lang) else NativeMessages.files_download_file(lang),
+                                    Modifier.size(20.dp), tint = MaterialTheme.colorScheme.outline)
+                            }
+                        }
                     }
                 }
             }

@@ -43,26 +43,92 @@ struct ViewerChoices: View {
     }
 }
 
+// A download from the Files tab (GET /download: a folder as a zip, a file
+// as it is), fetched with the hub's token into a folder of its own and
+// handed to the share sheet, where Save to Files is.
+struct FileDownload: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct ShareSheet: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+    func updateUIViewController(_ c: UIActivityViewController, context: Context) {}
+}
+
+@MainActor
+final class FileDownloader: ObservableObject {
+    @Published var ready: FileDownload?
+    @Published var busy = ""
+    @Published var failed = false
+
+    func fetch(_ from: URL?, name: String) {
+        guard let from, busy.isEmpty else { return }
+        busy = name
+        failed = false
+        Task {
+            defer { busy = "" }
+            do {
+                let (tmp, resp) = try await URLSession.shared.download(from: from)
+                guard (resp as? HTTPURLResponse)?.statusCode == 200 else { failed = true; return }
+                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("downloads/" + UUID().uuidString, isDirectory: true)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let safe = name.replacingOccurrences(of: "/", with: "_")
+                let to = dir.appendingPathComponent(safe.isEmpty ? (resp.suggestedFilename ?? "download") : safe)
+                try FileManager.default.moveItem(at: tmp, to: to)
+                ready = FileDownload(url: to)
+            } catch {
+                failed = true
+            }
+        }
+    }
+
+    // the copy goes once the share sheet is put away
+    func done(_ d: FileDownload) {
+        try? FileManager.default.removeItem(at: d.url.deletingLastPathComponent())
+    }
+}
+
 struct FilesScreen: View {
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
     let page: FilesPage
+    @StateObject private var downloads = FileDownloader()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ViewerChoices(model: model, viewer: viewer)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2) {
-                    ForEach(page.trail, id: \.self) { c in
-                        Button(c.label) { model.act(c.action, c.value) }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(c == page.trail.last ? .primary : .secondary)
-                        if c != page.trail.last { Text("/").foregroundStyle(.tertiary) }
+            HStack(spacing: 0) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 2) {
+                        ForEach(page.trail, id: \.self) { c in
+                            Button(c.label) { model.act(c.action, c.value) }
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(c == page.trail.last ? .primary : .secondary)
+                            if c != page.trail.last { Text("/").foregroundStyle(.tertiary) }
+                        }
                     }
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 6)
+                if let d = page.download, !d.isEmpty {
+                    Button(NativeMessages.files_download(lang)) { downloads.fetch(model.web(d), name: page.downloadName ?? "") }
+                        .buttonStyle(.borderless)
+                        .disabled(!downloads.busy.isEmpty)
+                        .accessibilityHint(NativeMessages.files_download_folder(lang))
+                        .padding(.trailing)
+                }
+            }
+            if !downloads.busy.isEmpty {
+                HStack(spacing: 8) { ProgressView(); Text(downloads.busy).lineLimit(1).truncationMode(.middle).font(.caption).foregroundStyle(.secondary) }
+                    .padding(.horizontal).padding(.bottom, 4)
+            } else if downloads.failed {
+                Text(NativeMessages.native_file_download_failed(lang)).font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal).padding(.bottom, 4)
             }
             Divider()
             if !page.ready {
@@ -72,21 +138,36 @@ struct FilesScreen: View {
                 Spacer()
             } else {
                 List(page.rows, id: \.value) { r in
-                    Button { model.act(r.action, r.value) } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: fileSymbol(r.icon))
-                                .foregroundStyle(r.kind == "folder" ? Color.accentColor : (r.action.isEmpty ? .secondary : .primary))
-                                .frame(width: 22)
-                            Text(r.label).lineLimit(1).truncationMode(.middle)
-                                .foregroundStyle(r.action.isEmpty ? .secondary : .primary)
-                            Spacer()
-                            if !r.detail.isEmpty { Text(r.detail).font(.caption).foregroundStyle(.secondary) }
+                    HStack(spacing: 12) {
+                        Button { model.act(r.action, r.value) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: fileSymbol(r.icon))
+                                    .foregroundStyle(r.kind == "folder" ? Color.accentColor : (r.action.isEmpty ? .secondary : .primary))
+                                    .frame(width: 22)
+                                Text(r.label).lineLimit(1).truncationMode(.middle)
+                                    .foregroundStyle(r.action.isEmpty ? .secondary : .primary)
+                                Spacer()
+                                if !r.detail.isEmpty { Text(r.detail).font(.caption).foregroundStyle(.secondary) }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(r.action.isEmpty)
+                        if let d = r.download, !d.isEmpty {
+                            Button { downloads.fetch(model.web(d), name: r.downloadName ?? r.label) } label: {
+                                Image(systemName: "arrow.down.circle")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(!downloads.busy.isEmpty)
+                            .accessibilityLabel(r.kind == "folder" ? NativeMessages.files_download_folder(lang) : NativeMessages.files_download_file(lang))
                         }
                     }
-                    .disabled(r.action.isEmpty)
                 }
                 .listStyle(.plain)
             }
+        }
+        .sheet(item: $downloads.ready, onDismiss: nil) { d in
+            ShareSheet(url: d.url).onDisappear { downloads.done(d) }
         }
     }
 }
