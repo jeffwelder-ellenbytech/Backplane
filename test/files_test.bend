@@ -111,6 +111,8 @@ def main() -> IO(Unit):
     C.Check.str("the folder on show zips from the thread", U.Fm.down(base(), True{}, ""), "/files/zip?thread=t1&path=")
     C.Check.str("a folder below zips by its path", U.Fm.down(base(), True{}, "mfg/gerbers"), "/files/zip?thread=t1&path=mfg/gerbers")
     C.Check.str("a file downloads by its path", U.Fm.down(base(), False{}, "docs/a b.pdf"), "/files/get?thread=t1&path=docs/a%20b.pdf")
+    C.Check.str("what a download never holds has no download", U.Fm.down(base(), False{}, "boards/_autosave-x.kicad_pcb") ++ "|" ++ U.Fm.down(base(), True{}, "boards/x-backups") ++ "|" ++ U.Fm.down(base(), False{}, ".env"), "||")
+    C.Check.str("a project's other dotfiles download", U.Fm.down(base(), False{}, ".backplane.json"), "/files/get?thread=t1&path=.backplane.json")
     C.Check.str("nothing selected downloads nothing", U.Fm.down(U.Ui.fold(log(), U.Ui.init(10n)), True{}, ""), "")
     C.Check.str("a thread elsewhere downloads nothing here", U.Ui.sel(far()) ++ ":" ++ U.Fm.down(far(), False{}, "a.txt"), "l1~t9:")
     C.Check.str("what a zip leaves out", String.join([Bool.show(FM.Fm.zip.skip(".git")), Bool.show(FM.Fm.zip.skip("a/node_modules")), Bool.show(FM.Fm.zip.skip("ecc83-backups")),

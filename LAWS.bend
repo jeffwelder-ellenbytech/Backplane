@@ -5383,6 +5383,56 @@ law fm_zip_disposition:
 law fm_zip_disposition_one_line:
   {FMG.Fm.disposition("a\r\nb") == "attachment; filename=\"a__b\"; filename*=UTF-8''a%0D%0Ab" : String}
 
+# environment files hold secrets: a zip leaves .env and .env.* out, and
+# keeps the project's other dotfiles
+law fm_zip_skips_env:
+  {FMG.Fm.zip.skip("firmware/.env") == True{} : Bool}
+
+law fm_zip_skips_env_variants:
+  {FMG.Fm.zip.skip(".env.production") == True{} : Bool}
+
+law fm_zip_keeps_dotfiles:
+  {FMG.Fm.zip.skip(".gitignore") == False{} : Bool}
+
+# every rule is of a kind the hub's writer reads (it refuses any other)
+law fm_zip_rules_known:
+  {FMG.Fm.zip.known(FMG.Fm.zip.rules()) == True{} : Bool}
+
+# what lies inside something left out is never served either
+law fm_zip_within_history:
+  {FMG.Fm.zip.within(".backplane/history.git/objects/ab") == True{} : Bool}
+
+law fm_zip_within_notes:
+  {FMG.Fm.zip.within(".backplane/checklist.md") == False{} : Bool}
+
+# compressed files are stored as they are, the design deflates
+law fm_zip_stores_compressed:
+  {FMG.Fm.zip.store("mfg/Gerbers.ZIP") == True{} : Bool}
+
+law fm_zip_deflates_boards:
+  {FMG.Fm.zip.store("boards/ecc83-pp.kicad_pcb") == False{} : Bool}
+
+# a backslash in a name never becomes a folder on Windows
+law fm_zip_entry_backslash:
+  {FMG.Fm.zip.entry("..\\..\\evil.bat") == ".._.._evil.bat" : String}
+
+# the zip's folder holds nothing Windows refuses in a name
+law fm_zip_top_windows:
+  {FMG.Fm.zip.top("a?b*c<d>e|f\"g", "") == "a_b_c_d_e_f_g" : String}
+
+# a download names no other place on Windows: no backslash, drive or share
+law fm_files_safe_backslash:
+  {FMG.Fm.files.safe("docs\\..\\..\\secret") == False{} : Bool}
+
+law fm_files_safe_drive:
+  {FMG.Fm.files.safe("C:/Users") == False{} : Bool}
+
+law fm_files_safe_share:
+  {FMG.Fm.files.safe("//host/share") == False{} : Bool}
+
+law fm_files_safe_down:
+  {FMG.Fm.files.safe("mfg/gerbers") == True{} : Bool}
+
 # Terminals in the chat (core/emb.bend)
 # -------------------------------------
 

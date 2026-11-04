@@ -18,21 +18,28 @@ test('only the hub page\'s own Files downloads are taken, from this hub or a rem
   ]) assert.equal(hubDownload(url, origin), false, url);
 });
 
-test('a name the hub gives is one plain file name', () => {
+test('a name the hub gives is one plain file name every desktop can hold', () => {
   assert.equal(downloadName('ecc83.zip'), 'ecc83.zip');
   assert.equal(downloadName('Schéma – notes ✓.md'), 'Schéma – notes ✓.md');
   assert.equal(downloadName('../../etc/passwd'), 'passwd');
   assert.equal(downloadName('a\\b\r\n.txt'), 'b.txt');
-  for (const bad of ['', '..', '.', null, '/']) assert.equal(downloadName(bad), 'download', String(bad));
+  assert.equal(downloadName('a:b<c>d|e?f*g"h.txt'), 'a_b_c_d_e_f_g_h.txt');
+  assert.equal(downloadName('notes. . '), 'notes');
+  for (const [given, want] of [['CON', '_CON'], ['nul.txt', '_nul.txt'], ['Com1.zip', '_Com1.zip'], ['LPT9', '_LPT9'], ['console.txt', 'console.txt'], ['aux-board.zip', 'aux-board.zip']])
+    assert.equal(downloadName(given), want, given);
+  for (const bad of ['', '..', '.', null, '/', '...']) assert.equal(downloadName(bad), 'download', String(bad));
 });
 
-test('never over a file already there, nor one being saved', () => {
+test('never over a file already there, nor one another download took', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bp-downloads-'));
   try {
     fs.writeFileSync(path.join(dir, 'ecc83.zip'), 'x');
-    const taken = new Set([path.join(dir, 'ecc83 (2).zip')]);
-    assert.equal(downloadTarget(dir, 'ecc83.zip', taken), path.join(dir, 'ecc83 (3).zip'));
-    assert.equal(downloadTarget(dir, 'README', new Set()), path.join(dir, 'README'));
+    fs.writeFileSync(path.join(dir, 'ecc83 (2).zip'), '');
+    const file = downloadTarget(dir, 'ecc83.zip');
+    assert.equal(file, path.join(dir, 'ecc83 (3).zip'));
+    assert.ok(fs.existsSync(file), 'the name is taken at once');
+    assert.equal(fs.readFileSync(path.join(dir, 'ecc83.zip'), 'utf8'), 'x', 'the file there is untouched');
+    assert.equal(downloadTarget(dir, 'README'), path.join(dir, 'README'));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -54,7 +61,10 @@ test('a Files download is saved to Downloads; anything else keeps its dialog', (
     assert.equal(a.saved, path.join(dir, 'ecc83.zip'));
     assert.equal(b.saved, path.join(dir, 'ecc83 (2).zip'), 'two at once take two names');
     a.emit('done', {}, 'completed');
-    assert.deepEqual(done, [['completed', path.join(dir, 'ecc83.zip')]]);
+    b.emit('done', {}, 'cancelled');
+    assert.deepEqual(done, [['completed', path.join(dir, 'ecc83.zip')], ['cancelled', path.join(dir, 'ecc83 (2).zip')]]);
+    assert.ok(fs.existsSync(path.join(dir, 'ecc83.zip')));
+    assert.ok(!fs.existsSync(path.join(dir, 'ecc83 (2).zip')), 'a cancelled download gives its name back');
     const other = item('https://elsewhere.example/report.pdf', 'report.pdf');
     session.emit('will-download', {}, other);
     assert.equal(other.saved, undefined, 'another site\'s download is left to Electron (a save dialog)');

@@ -7460,6 +7460,48 @@ def Laws.fm_zip_disposition():
 def Laws.fm_zip_disposition_one_line():
   {==}
 
+def Laws.fm_zip_skips_env():
+  {==}
+
+def Laws.fm_zip_skips_env_variants():
+  {==}
+
+def Laws.fm_zip_keeps_dotfiles():
+  {==}
+
+def Laws.fm_zip_rules_known():
+  {==}
+
+def Laws.fm_zip_within_history():
+  {==}
+
+def Laws.fm_zip_within_notes():
+  {==}
+
+def Laws.fm_zip_stores_compressed():
+  {==}
+
+def Laws.fm_zip_deflates_boards():
+  {==}
+
+def Laws.fm_zip_entry_backslash():
+  {==}
+
+def Laws.fm_zip_top_windows():
+  {==}
+
+def Laws.fm_files_safe_backslash():
+  {==}
+
+def Laws.fm_files_safe_drive():
+  {==}
+
+def Laws.fm_files_safe_share():
+  {==}
+
+def Laws.fm_files_safe_down():
+  {==}
+
 def Laws.emb_summary_round():
   {==}
 

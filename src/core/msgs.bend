@@ -1312,6 +1312,13 @@ def T.files.download(l: I.Loc) -> String:
     case I.Ja{}:
       "ダウンロード"
 
+def T.files.download.failed(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "The download did not finish"
+    case I.Ja{}:
+      "ダウンロードが完了しませんでした"
+
 def T.files.download.file(l: I.Loc, arg0: String) -> String:
   match l:
     case I.En{}:

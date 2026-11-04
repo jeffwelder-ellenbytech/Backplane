@@ -17,31 +17,43 @@ function hubDownload(url, origin) {
   } catch { return false; }
 }
 
-// one plain file name: no folder, no control character, never empty or a dot name
+// one plain file name every desktop can hold: no folder, no control
+// character, none of : < > | ? * " (Windows refuses them), no trailing dot
+// or space, never a device name Windows reserves (CON, NUL.txt, COM1...),
+// never empty or a dot name
+const RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i;
 function downloadName(name) {
-  const base = String(name || '').replace(/[\x00-\x1f\x7f]/g, '').split(/[\\/]/).pop().replace(/^\.+$/, '').trim();
+  let base = String(name || '').replace(/[\x00-\x1f\x7f]/g, '').split(/[\\/]/).pop();
+  base = base.replace(/[:<>|?*"]/g, '_').replace(/[. ]+$/, '').trim();
+  if (/^\.*$/.test(base)) base = '';
+  if (RESERVED.test(base)) base = '_' + base;
   return (base || 'download').slice(0, 200);
 }
 
-// the first of "name.ext", "name (2).ext", ... that is neither on disk nor
-// being saved now
-function downloadTarget(dir, name, taken, exists = fs.existsSync) {
+// the first of "name.ext", "name (2).ext", ... that can be taken: made
+// empty at once (exclusive create), so no other download, and no other
+// program between the check and the save, gets the same name
+function downloadTarget(dir, name, take = file => { fs.closeSync(fs.openSync(file, 'wx')); }) {
   const ext = path.extname(name), stem = ext ? name.slice(0, -ext.length) : name;
   for (let i = 1; i <= 10000; i++) {
     const file = path.join(dir, i === 1 ? name : `${stem} (${i})${ext}`);
-    if (!taken.has(file) && !exists(file)) return file;
+    try { take(file); return file; }
+    catch (e) { if (e.code !== 'EEXIST') throw e; }
   }
-  return path.join(dir, `${stem} (${Date.now()})${ext}`);
+  throw Error('Too many downloads with this name');
 }
 
-function installDownloads(session, { origin, downloads, onDone = () => {}, exists = fs.existsSync }) {
-  const taken = new Set();
+function installDownloads(session, { origin, downloads, onDone = () => {}, take, drop = file => {
+  // the name kept for a download that did not finish goes again
+  try { if (fs.statSync(file).size === 0) fs.unlinkSync(file); } catch {}
+} }) {
   const listener = (_event, item) => {
     if (!hubDownload(item.getURL(), origin())) return;
-    const file = downloadTarget(downloads(), downloadName(item.getFilename()), taken, exists);
-    taken.add(file);
+    let file;
+    try { file = downloadTarget(downloads(), downloadName(item.getFilename()), take); }
+    catch { return; }
     item.setSavePath(file);
-    item.once('done', (_e, state) => { taken.delete(file); onDone(state, file); });
+    item.once('done', (_e, state) => { if (state !== 'completed') drop(file); onDone(state, file); });
   };
   session.on('will-download', listener);
   return () => session.removeListener('will-download', listener);

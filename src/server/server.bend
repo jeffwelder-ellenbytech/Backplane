@@ -59,6 +59,7 @@ import ../core/exe.bend as EX
 import ./lockio.bend as LG
 import ../core/locks.bend as LCK
 import ./host.bend as H
+import ./zip.bend as ZIP
 import ./proc.bend as P
 import ../core/json.bend as J
 import ../core/utf8.bend as U
@@ -246,8 +247,8 @@ type Msg is Data:
   LockSaw{name: String, holder: String, out: String}
   LockHttp{op: String, body: String, reply: Chan(String)}
   # a Files download asks where a thread's folder is (core/hub.bend's
-  # Hub.files.of: "<folder>\n<project title>")
-  FilesRoot{thread: String, reply: Chan(String)}
+  # Hub.files.of)
+  FilesRoot{thread: String, reply: Chan(B.FilesAt)}
   Announce{text: String}
   Mcp{thread: String, body: String, reply: Chan(String)}
   # a request on the MCP route arrived, its answer was written (the open
@@ -6311,57 +6312,108 @@ def Info.serve(allowed: Bool, s: Socket, +h: String) -> IO(Unit):
 # Downloads from the Files tab (core/fm.bend's Fm.zip.*, Fm.get.url):
 # GET /files/zip?thread=<id>&path=<folder> streams the folder as a zip,
 # GET /files/get?thread=<id>&path=<file> one file as an attachment, for a
-# client the hub lets in. The path is from the thread's folder (Fm.safe),
-# which the hub names (core/hub.bend's Hub.files.of), and the effect keeps
-# it there (no symlink is followed out of it: host.js's host_files_inside).
-def FilesHttp.send(zip: Bool, s: Socket, +root: String, +title: String, +rel: String, range: String) -> IO(Unit):
+# client the hub lets in (the pairing token or a paired device's
+# credential, Conn.allowed). The path is from the thread's folder, which
+# the hub names (core/hub.bend's Hub.files.of), and may name nothing
+# Windows reads as another place (Fm.files.safe); zip.bend's Zip.inside
+# resolves it within that folder, and what a zip leaves out is never
+# served, by its real path (Fm.zip.within).
+def FilesHttp.no(s: Socket, +status: String, +text: String) -> IO(Unit):
+  Conn.finish(s, W.Http.text(status, text))
+
+def FilesHttp.zip(s: Socket, +root: String, +title: String, +rel: String) -> IO(Unit):
+  do IO<Unit>:
+    sent : Socket & Result<&1, &1, U32 & String, Unit> <- ZIP.Zip.send(s, ZIP.ZipPlan{root, rel, FMP.Fm.zip.top(title, rel), FMP.Fm.disposition(FMP.Fm.zip.name(title, rel)),
+      FMP.Fm.zip.rules(), FMP.Fm.zip.stored(), FMP.Fm.zip.swap(), FMP.Fm.zip.note(), FMP.Fm.zip.note.head(), FMP.Fm.zip.why()})
+    s2 : Socket <- Conn.sent(sent)
+    Socket.close(s2)
+
+# (named as it was asked for: the real path's name may be another
+# normalization of it, as macOS gives it back)
+def FilesHttp.get(s: Socket, +root: String, +rel: String, +name: String, range: String) -> IO(Unit):
+  do IO<Unit>:
+    sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_download(s, root ++ "/" ++ rel, FMP.Fm.disposition(name), range)
+    s2 : Socket <- Conn.sent(sent)
+    Socket.close(s2)
+
+def FilesHttp.folder(ok: Bool, s: Socket, +root: String, +title: String, +rel: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      FilesHttp.zip(s, root, title, rel)
+    case False{}:
+      FilesHttp.no(s, "404 Not Found", "not a folder")
+
+def FilesHttp.file(ok: Bool, s: Socket, +root: String, +rel: String, +name: String, range: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      FilesHttp.get(s, root, rel, name, range)
+    case False{}:
+      FilesHttp.no(s, "404 Not Found", "not a file")
+
+# what Zip.inside found: a folder to zip (title: the project's), or a file
+# to send (title: its name as asked for)
+def FilesHttp.kind(zip: Bool, s: Socket, +root: String, +title: String, +rel: String, +kind: String, range: String) -> IO(Unit):
   match zip:
     case True{}:
-      do IO<Unit>:
-        sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_zip(s, root, rel, FMP.Fm.zip.top(title, rel), FMP.Fm.disposition(FMP.Fm.zip.name(title, rel)), FMP.Fm.zip.rules())
-        s2 : Socket <- Conn.sent(sent)
-        Socket.close(s2)
+      FilesHttp.folder(String.eq(kind, "d"), s, root, title, rel)
     case False{}:
-      do IO<Unit>:
-        sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_download(s, root, rel, FMP.Fm.disposition(FMP.Fm.last(rel)), range)
-        s2 : Socket <- Conn.sent(sent)
-        Socket.close(s2)
+      FilesHttp.file(Bool.and(String.eq(kind, "f"), Bool.not(String.is_empty(rel))), s, root, rel, Bool.pick(String, String.is_empty(title), FMP.Fm.last(rel), title), range)
 
-def FilesHttp.found.k(none: Bool, zip: Bool, s: Socket, +root: String, +title: String, +rel: String, range: String) -> IO(Unit):
+def FilesHttp.kept(out: Bool, zip: Bool, s: Socket, +root: String, +title: String, +rel: String, +kind: String, range: String) -> IO(Unit):
+  match out:
+    case True{}:
+      FilesHttp.no(s, "404 Not Found", "left out of downloads")
+    case False{}:
+      FilesHttp.kind(zip, s, root, title, rel, kind, range)
+
+def FilesHttp.found(at: List<&2, String>, zip: Bool, s: Socket, +title: String, range: String) -> IO(Unit):
+  match at:
+    case +root <> +rel <> +kind <> _:
+      FilesHttp.kept(FMP.Fm.zip.within(rel), zip, s, root, title, rel, kind, range)
+    case _:
+      FilesHttp.no(s, "404 Not Found", "not found")
+
+def FilesHttp.label(zip: Bool, +title: String, +rel: String) -> String:
+  match zip:
+    case True{}: title
+    case False{}: FMP.Fm.last(rel)
+
+def FilesHttp.root(none: Bool, +zip: Bool, s: Socket, +root: String, +title: String, +rel: String, range: String) -> IO(Unit):
   match none:
     case True{}:
-      Conn.finish(s, W.Http.text("404 Not Found", "no such thread"))
+      FilesHttp.no(s, "404 Not Found", "no such thread")
     case False{}:
-      FilesHttp.send(zip, s, root, title, rel, range)
+      IO.bind(List<&2, String>, Unit, ZIP.Zip.inside(root, rel), found => FilesHttp.found(found, zip, s, FilesHttp.label(zip, title, rel), range))
 
-def FilesHttp.found(+text: String, zip: Bool, s: Socket, +rel: String, range: String) -> IO(Unit):
-  +root = Maybe.default(&2, String, List.head(&2, String, String.split(text, '\n')), "")
-  FilesHttp.found.k(String.is_empty(root), zip, s, root, String.drop(text, 1n+String.length(root)), rel, range)
+def FilesHttp.at(at: B.FilesAt, zip: Bool, s: Socket, +rel: String, range: String) -> IO(Unit):
+  match at:
+    case B.FilesAt{+root, +title}:
+      FilesHttp.root(String.is_empty(root), zip, s, root, title, rel, range)
 
-def FilesHttp.got(m: Maybe<&1, String>, zip: Bool, s: Socket, +rel: String, range: String) -> IO(Unit):
+def FilesHttp.got(m: Maybe<&1, B.FilesAt>, zip: Bool, s: Socket, +rel: String, range: String) -> IO(Unit):
   match m:
-    case Some{+text}:
-      FilesHttp.found(text, zip, s, rel, range)
+    case Some{at}:
+      FilesHttp.at(at, zip, s, rel, range)
     case None{}:
-      Conn.finish(s, W.Http.text("503 Service Unavailable", "the hub did not answer"))
+      FilesHttp.no(s, "503 Service Unavailable", "the hub did not answer")
 
 def FilesHttp.safe(ok: Bool, zip: Bool, s: Socket, +thread: String, +rel: String, range: String, +inbox: Chan(Msg)) -> IO(Unit):
   match ok:
     case False{}:
-      Conn.finish(s, W.Http.text("400 Bad Request", "that path is not in this project"))
+      FilesHttp.no(s, "400 Bad Request", "that path is not in this project")
     case True{}:
       do IO<Unit>:
-        +reply : Chan(String) <- Chan.new(String, 1)
+        +reply : Chan(B.FilesAt) <- Chan.new(B.FilesAt, 1)
         sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, FilesRoot{thread, reply})
-        m : Maybe<&1, String> <- Chan.recv(String, reply)
+        m : Maybe<&1, B.FilesAt> <- Chan.recv(B.FilesAt, reply)
         FilesHttp.got(m, zip, s, rel, range)
 
 def FilesHttp.serve(allowed: Bool, zip: Bool, s: Socket, +p: String, range: String, +inbox: Chan(Msg)) -> IO(Unit):
   match allowed:
     case False{}:
-      Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
+      FilesHttp.no(s, "401 Unauthorized", "this Backplane needs its pairing token")
     case True{}:
-      FilesHttp.safe(FMP.Fm.safe(ATT.Att.from_uri("file://" ++ W.Http.param(p, "path"))), zip, s,
+      FilesHttp.safe(FMP.Fm.files.safe(ATT.Att.from_uri("file://" ++ W.Http.param(p, "path"))), zip, s,
         ATT.Att.from_uri("file://" ++ W.Http.param(p, "thread")), ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")), range, inbox)
 
 def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, +coding: U32, +allowed: Bool, +range: String, +inbox: Chan(Msg)) -> IO(Unit):
@@ -18789,11 +18841,11 @@ def Hub.lock.http(h: Hub, +op: String, +body: String, +reply: Chan(String), +now
   Hub.lock.http.valid(Bool.and(LCK.Lock.name.valid(J.Json.get_str(a, "name", "")), Bool.and(String.starts_with(J.Json.get_str(a, "holder", ""), "pid:"), M.Launch.has(["acquire", "renew", "release", "cancel", "status"], op))), h, op, a, reply, now)
 
 # where a Files download reads from (FilesHttp.*), answered at once
-def Hub.files.root(h: Hub, +thread: String, +reply: Chan(String)) -> IO(Hub):
+def Hub.files.root(h: Hub, +thread: String, +reply: Chan(B.FilesAt)) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
-        sent : Result<&1, &1, String, Unit> <- Chan.send(String, reply, B.Hub.files.of(st, thread))
+        sent : Result<&1, &1, B.FilesAt, Unit> <- Chan.send(B.FilesAt, reply, B.Hub.files.of(st, thread))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 def Hub.mail.failed(h: Hub, +body: MB.Body, +reason: String, +now: Nat) -> IO(Hub):

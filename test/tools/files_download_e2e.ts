@@ -1,5 +1,5 @@
 // End to end: the Files tab's downloads (core/fm.bend's Fm.zip.*, server.bend's
-// FilesHttp, host.js's Sock.send_zip/send_download) on a real KiCad project.
+// FilesHttp, effects/zip.js, host.js's Sock.send_download) on a real KiCad project.
 // KiCad's ecc83 demo is copied into a temporary folder and made a git
 // repository, with boards/, docs/ (a PDF, a non-ASCII name), mfg/ (gerbers
 // from kicad-cli when it is installed, zipped), a file over 1 MB, KiCad's
@@ -96,6 +96,9 @@ cpSync(demo, project, { recursive: true });
 run("git", ["init", "-q", "-b", "main"]);
 run("git", ["-c", "user.name=e2e", "-c", "user.email=e2e@example.com", "add", "-A"]);
 run("git", ["-c", "user.name=e2e", "-c", "user.email=e2e@example.com", "commit", "-qm", "ecc83 demo"]);
+// the hub's own history store, as a step capture makes it (left out of every download)
+run("git", ["init", "-q", "--bare", ".backplane/history.git"]);
+writeFileSync(join(project, ".env"), "KICAD_TOKEN=secret\n");
 mkdirSync(join(project, "boards"));
 cpSync(join(project, "ecc83-pp.kicad_pcb"), join(project, "boards/ecc83-pp-rev2.kicad_pcb"));
 mkdirSync(join(project, "docs"));
@@ -182,9 +185,10 @@ try {
     { extra: [...got.keys()].filter((k) => !want.has(k)), missing: [...want.keys()].filter((k) => !got.has(k)) });
   const same = [...want].filter(([, b]) => b !== null).every(([p, b]) => readFileSync(join(out, "ecc83", p)).equals(b!));
   check("every file comes out byte for byte", same);
-  const diff = spawnSync("diff", ["-r", "-x", ".git", "-x", "ecc83-pp-backups", "-x", "*.lck", "-x", "etc-link", "-x", ".backplane", folder, join(out, "ecc83")]);
+  const diff = spawnSync("diff", ["-r", "-x", ".git", "-x", "ecc83-pp-backups", "-x", "*.lck", "-x", "etc-link", "-x", ".backplane", "-x", ".env", folder, join(out, "ecc83")]);
   check("diff -r against the folder (less what is skipped) is empty", diff.status === 0, diff.stdout.toString().slice(0, 400));
   check("no .git in the zip", ![...got.keys()].some((k) => k.startsWith(".git")));
+  check("no .env in the zip", !got.has(".env"));
   check("KiCad's backups and locks are left out", ![...got.keys()].some((k) => k.includes("-backups") || k.endsWith(".lck")));
   check("an empty folder is kept", got.has("extra/empty/"));
   check("the non-ASCII name is kept", got.has("docs/Schéma – notes ✓.md"));
@@ -227,6 +231,18 @@ try {
   check("an absolute path: 400", (await fetch(url(`/files/get?thread=${enc(thread)}&path=/etc/hosts`), { headers: auth })).status === 400);
   check("a symlink out of the project: 404", (await fetch(url(`/files/get?thread=${enc(thread)}&path=extra/etc-link/hosts`), { headers: auth })).status === 404);
   check("an unknown thread: 404", (await fetch(url(`/files/zip?thread=nothing&path=`), { headers: auth })).status === 404);
+  check("a thread elsewhere is never read here: 404", (await fetch(url(`/files/zip?thread=${enc("l1~" + thread)}&path=`), { headers: auth })).status === 404);
+  check("a backslash path: 400", (await fetch(url(`/files/get?thread=${enc(thread)}&path=${enc("docs\\..\\..\\x")}`), { headers: auth })).status === 400);
+  check("a drive path: 400", (await fetch(url(`/files/get?thread=${enc(thread)}&path=${enc("C:/Windows/win.ini")}`), { headers: auth })).status === 400);
+  // the hub's own history, by any way of naming it (the project's home)
+  const phome = enc("project-home-" + proj.id);
+  for (const p of [".backplane/history.git/HEAD", "./.backplane/history.git/HEAD", ".git/HEAD", "ecc83-pp-backups/ecc83-pp-2026-11-01_120000.zip"])
+    check(`what a download never holds is not served: ${p}`, (await fetch(url(`/files/get?thread=${phome}&path=${enc(p)}`), { headers: auth })).status === 404);
+  const bz = await fetch(url(`/files/zip?thread=${phome}&path=${enc("./.backplane")}`), { headers: auth });
+  const bzFile = join(root, "backplane.zip");
+  writeFileSync(bzFile, Buffer.from(await bz.arrayBuffer()));
+  const bzList = spawnSync("unzip", ["-Z1", bzFile]).stdout.toString();
+  check("./.backplane zips without the history or the worktrees", bz.status === 200 && !/history\.git|worktrees/.test(bzList), bzList.slice(0, 300));
   check("a cross-site request: 401", (await fetch(url(`/files/get?thread=${enc(thread)}&path=docs/README.md`), { headers: { ...auth, "Sec-Fetch-Site": "cross-site" } })).status === 401);
   ws.close();
 

@@ -1010,6 +1010,7 @@ files.back.tip = フォルダに戻る
 files.tab = タブで開く
 files.download = ダウンロード
 files.download.tip = このフォルダをzipでダウンロード
+files.download.failed = ダウンロードが完了しませんでした
 files.download.file = {name}をダウンロード
 files.download.folder = {name}をzipでダウンロード
 review.refresh.tip = 設計を再取得

@@ -137,16 +137,21 @@ def Fm.size(+n: Nat) -> String:
 def Fm.title(+dir: String) -> String:
   Bool.pick(String, String.is_empty(dir), "Project", Fm.last(dir))
 
-# Downloads (laws fm_zip_*, fm_get_*): a file downloads as itself, a folder
-# as <name>.zip, from the hub's /files/get and /files/zip (server.bend's
-# FilesHttp.*), each named by the thread and a path from its folder's root
-# (Fm.safe). A zip leaves out what is never the design: git's and the
-# hub's own history, the threads' worktrees (each a copy of the project), KiCad's backup folders, autosaves and locks,
-# node_modules, caches. The rules are data the hub's zip writer reads
-# (host.js's host_zip_skip), each a kind and a text: "=" a name, "*" the
-# end of a name, "^" the start of a name, "/" a path from the root.
+# Downloads (laws fm_zip_*, fm_get_*, fm_files_*): a file downloads as
+# itself, a folder as <name>.zip, from the hub's /files/get and /files/zip
+# (server.bend's FilesHttp.*), each named by the thread and a path from its
+# folder's root (Fm.files.safe). A zip leaves out what is never the design
+# or must not leave the machine: git's and the hub's own history, the
+# threads' worktrees (each a copy of the project), KiCad's backup folders,
+# autosaves and locks, node_modules, caches, and environment files (.env,
+# .env.*: secrets). Other dotfiles of the project (.backplane.json,
+# .gitignore, .github) stay in. The rules are data the hub's zip writer
+# reads (effects/zip.js's zip_skip, which refuses a kind it does not know;
+# test/files_zip_test.bend checks the two agree), each a kind and a text:
+# "=" a name, "*" the end of a name, "^" the start of a name, "/" a path
+# from the root.
 def Fm.zip.rules() -> List<&2, String>:
-  ["=.git", "=node_modules", "=.DS_Store", "=__pycache__", "*-backups", "*.lck", "^_autosave-", "/.backplane/history.git", "/.backplane/worktrees"]
+  ["=.git", "=node_modules", "=.DS_Store", "=__pycache__", "=.env", "^.env.", "*-backups", "*.lck", "^_autosave-", "/.backplane/history.git", "/.backplane/worktrees"]
 
 def Fm.zip.rule(+r: String, +p: String) -> Bool:
   Bool.pick(Bool, String.starts_with(r, "="), String.eq(Fm.last(p), String.drop(r, 1n)),
@@ -165,8 +170,69 @@ def Fm.zip.any(rs: List<&2, String>, +p: String) -> Bool:
 def Fm.zip.skip(+p: String) -> Bool:
   Fm.zip.any(Fm.zip.rules(), p)
 
+def Fm.zip.kind(+r: String) -> Bool:
+  Bool.or(Bool.or(String.starts_with(r, "="), String.starts_with(r, "*")), Bool.or(String.starts_with(r, "^"), String.starts_with(r, "/")))
+
+# whether every rule is of a kind the writer reads (law fm_zip_rules_known)
+def Fm.zip.known(rs: List<&2, String>) -> Bool:
+  match rs:
+    case Nil{}:
+      True{}
+    case +r <> t:
+      Bool.and(Fm.zip.kind(r), Fm.zip.known(t))
+
+def Fm.zip.within.go(ps: List<&2, String>, +at: String) -> Bool:
+  match ps:
+    case Nil{}:
+      False{}
+    case +p <> t:
+      Bool.or(Fm.zip.skip(Fm.join(at, p)), Fm.zip.within.go(t, Fm.join(at, p)))
+
+# whether a path is, or is inside, something a zip leaves out: such a
+# folder is not zipped and such a file is not served (".backplane/history.git/HEAD")
+def Fm.zip.within(+p: String) -> Bool:
+  Fm.zip.within.go(String.split(p, '/'), "")
+
+# what a zip keeps as it is, not deflated: files already compressed
+def Fm.zip.stored() -> List<&2, String>:
+  [".zip", ".gz", ".tgz", ".xz", ".bz2", ".zst", ".7z", ".rar", ".jar", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".glb", ".mp4", ".mov", ".docx", ".xlsx", ".pptx"]
+
+def Fm.zip.store(+name: String) -> Bool:
+  Fm.ends(Fm.zip.stored(), Fm.ext(name))
+
+# the characters an entry's name may not hold in a zip, each made "_": a
+# backslash, which Windows' unpackers read as a folder ("..\..\evil.bat").
+# (The hub's writer leaves a file named with one out, and says so in the
+# note, outside Windows: its runtime reads the name as a path.)
+def Fm.zip.swap() -> String:
+  "\\"
+
+def Fm.zip.entry.go(s: String) -> String:
+  match s:
+    case SNil{}:
+      SNil{}
+    case SCon{Chr{+c}, t}:
+      SCon{Chr{Bool.pick(U32, U32.is_eq(c, 92), 95, c)}, Fm.zip.entry.go(t)}
+
+# one name as a zip holds it
+def Fm.zip.entry(+name: String) -> String:
+  Fm.zip.entry.go(name)
+
+# the note at the top of a zip when something could not be put in it, and
+# what it says: a line, then each path with why ("<code>=<words>", "*" for
+# any other code)
+def Fm.zip.note() -> String:
+  "SKIPPED.txt"
+
+def Fm.zip.note.head() -> String:
+  "Backplane could not put these in the zip:\n"
+
+def Fm.zip.why() -> List<&2, String>:
+  ["EACCES=no permission to read it", "EPERM=no permission to read it", "ENOENT=it went away while the zip was made", "ELOOP=it changed into a link while the zip was made", "short=it got shorter while the zip was made", "backslash=its name holds a backslash, which the hub does not read", "*=it could not be read"]
+
 def Fm.zip.char(+c: U32) -> U32:
-  Bool.pick(U32, Bool.or(U32.is_lt(c, 32), Bool.or(U32.is_eq(c, 47), Bool.or(U32.is_eq(c, 92), U32.is_eq(c, 58)))), 95, c)
+  Bool.pick(U32, Bool.or(Bool.or(U32.is_lt(c, 32), Bool.or(U32.is_eq(c, 47), Bool.or(U32.is_eq(c, 92), U32.is_eq(c, 58)))),
+    Bool.or(Bool.or(U32.is_eq(c, 63), U32.is_eq(c, 42)), Bool.or(Bool.or(U32.is_eq(c, 60), U32.is_eq(c, 62)), Bool.or(U32.is_eq(c, 124), U32.is_eq(c, 34))))), 95, c)
 
 def Fm.zip.clean.go(s: String) -> String:
   match s:
@@ -179,13 +245,22 @@ def Fm.zip.clean.k(+n: String) -> String:
   Bool.pick(String, Bool.or(String.is_empty(n), Bool.or(String.eq(n, "."), String.eq(n, ".."))), "project", n)
 
 # the folder a zip holds everything in: the folder's name, or the
-# project's title for its root; one name, never "." or ".."
+# project's title for its root; one name, never "." or "..", nothing a
+# file system refuses in a name (/ \ : ? * < > | " and controls are "_")
 def Fm.zip.top(+title: String, +dir: String) -> String:
   Fm.zip.clean.k(Fm.zip.clean.go(Bool.pick(String, String.is_empty(dir), title, Fm.last(dir))))
 
 # the name a folder downloads as
 def Fm.zip.name(+title: String, +dir: String) -> String:
   Fm.zip.top(title, dir) ++ ".zip"
+
+def Fm.drive(+rel: String) -> Bool:
+  String.eq(String.drop(String.take(rel, 2n), 1n), ":")
+
+# a path a download may name: Fm.safe, and nothing Windows would read as
+# another place (a backslash, a drive "C:", a share "//host" or "\\host")
+def Fm.files.safe(+rel: String) -> Bool:
+  Bool.and(Fm.safe(rel), Bool.and(Bool.not(String.contains(rel, "\\")), Bool.not(Fm.drive(rel))))
 
 def Fm.hex(+n: U32) -> Char:
   Chr{U32.add(n, Bool.pick(U32, U32.is_lt(n, 10), 48, 55))}
