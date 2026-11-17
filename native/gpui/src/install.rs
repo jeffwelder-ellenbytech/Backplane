@@ -42,6 +42,10 @@ pub fn install(src: &Path, prefix: &Path, tag: &str) -> std::io::Result<PathBuf>
     std::fs::rename(&fresh, &guard)?;
     /* i18n-ok: file and env names */ let current = prefix.join("CURRENT");
     if !current.is_file() { let t = prefix.join(".CURRENT.tmp"); std::fs::write(&t, format!("{tag}\n"))?; std::fs::rename(&t, &current)?; }
+    // where no guard runs (the app uses a hub on another machine), nothing would move CURRENT: the app's next launch tries a newer build put
+    // here by hand, as it tries one it fetched (appkeep.rs). A guard never reads this.
+    let cur = crate::appkeep::current(prefix);
+    if !cur.is_empty() && crate::appkeep::newer(tag, &cur) { crate::appkeep::put(&crate::appkeep::dir(prefix).join("next"), &format!("{tag}\n"))?; }
     Ok(dest.join("backplane-gpui.exe"))
 }
 
@@ -169,6 +173,7 @@ mod tests {
         assert!(pre.join("builds/v0.15.1/backplane-gpui.exe").is_file() && pre.join("builds/v0.15.0/backplane-gpui.exe").is_file());
         assert_eq!(std::fs::read_to_string(pre.join("backplane.exe")).unwrap(), "guard 2");
         assert_eq!(std::fs::read_to_string(pre.join("CURRENT")).unwrap(), "v0.15.0\n", "the guard moves CURRENT, after its health check");
+        assert_eq!(crate::appkeep::next(&pre), "v0.15.1", "or, with no guard, the app's next launch tries it");
         let left: Vec<String> = std::fs::read_dir(pre.join("builds")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert!(left.iter().all(|n| !n.starts_with('.')), "no scratch left: {left:?}");
         #[cfg(windows)] assert!(crate::launch::guarded_install(&app).is_some(), "the installed client is run by the guard");

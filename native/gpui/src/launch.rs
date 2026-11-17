@@ -87,7 +87,7 @@ pub fn guarded_install(me: &Path) -> Option<(PathBuf, PathBuf)> {
     /* i18n-ok: folder names */ (prefix.join("CURRENT").is_file() && guard.is_file()).then(|| (guard, prefix.to_path_buf()))
 }
 
-fn detached(cmd: &mut std::process::Command) {
+pub(crate) fn detached(cmd: &mut std::process::Command) {
     #[cfg(unix)] { use std::os::unix::process::CommandExt; cmd.process_group(0); }
     // a console of its own that is never shown (CREATE_NO_WINDOW), shared by what the hub starts (git, sh), in its own group (CREATE_NEW_PROCESS_GROUP):
     // started from this window program with nothing, Windows would open a console window for the hub

@@ -40,6 +40,11 @@ mod vt;
 /// What `systemd-run --user --scope` takes here, shared by path with the hub (the hub's own scope, launch.rs).
 #[path = "../../host/src/scopeprobe.rs"]
 mod scopeprobe;
+// this device's app's own updates where no guard runs (a hub on another machine): the rules, shared with the guard's `backplane builds keep`
+#[path = "../../guard/src/appkeep.rs"]
+#[allow(dead_code)]
+mod appkeep;
+mod selfupdate;
 use gpui::{prelude::*, *, actions};
 use serde_json::Value;
 use std::{collections::{HashMap,VecDeque},time::{Duration,Instant}};
@@ -203,12 +208,21 @@ impl Backplane {
     pub fn light(&self)->bool{self.theme_override.unwrap_or_else(||self.local.light(self.data["theme"]=="light"))}
     /// A press of a `local:<name>` button in the settings dialog: this device's own setting, applied here and kept in the local file; the hub hears nothing.
     pub fn local_press(&mut self,name:&str,value:&str,cx:&mut Context<Self>){
+        if name=="app-check"{self.app_check(cx);return;}
         if !self.local.set(name,value){return;}
+        if name=="app-channel"{self.local.save();self.app_check(cx);}
         if name=="sidebar-open"{self.sidebar_open=self.local.sidebar_open;}
         if name=="lang"{crate::i18n::set_choice(&self.local.lang);cx.defer(keys::install_menus);}
         if name.starts_with("streamer"){self.local.save();self.streamer_apply(cx);}
         if name.starts_with("shortcut"){let l=self.local.clone();cx.defer(move|cx|bind_all(cx,&l));}
         self.local.save();self.ui_epoch+=1;cx.notify();
+    }
+    /// This device's app looks for a newer build now (selfupdate.rs: Check now in its row, or the hub's Check now beside it), and its row is drawn
+    /// again as the look goes on, until it ends.
+    pub fn app_check(&mut self,cx:&mut Context<Self>){
+        let Some(mut child)=selfupdate::check() else {return};
+        cx.spawn(async move|this,cx|{for _ in 0..1200 {cx.background_executor().timer(Duration::from_millis(500)).await;let done=child.try_wait().map_or(true,|s|s.is_some());if this.update(cx,|_,cx|cx.notify()).is_err()||done{break}}}).detach();
+        cx.notify();
     }
     /// The gear: this device's page opens at once (no round trip), and the hub is asked for its pages beside it.
     pub fn open_settings(&mut self,cx:&mut Context<Self>){
@@ -345,6 +359,9 @@ fn main()->anyhow::Result<()> {
     script::metric(started,"process_start",serde_json::json!({}));
     // Windows: an unpacked release asks to install itself where the guard can update it (install.rs); on Install the installed one runs
     #[cfg(windows)] if install::maybe_install(config.pending) { return Ok(()) }
+    // a hub on another machine: this app keeps its own build (selfupdate.rs); a staged build is tried here, before any window, and this process may become it
+    {let saved=launch::load();let env=std::env::var_os("BACKPLANE_HOME").map_or(false,|h|!h.is_empty());
+     selfupdate::at_launch(selfupdate::remote(config.pending,env,hubs::local_target(&hubs::load()).is_some(),&saved.url));}
     let app=Application::new().with_assets(art::Assets);
     // macOS hands a backplane:// link to the app itself, at launch and while it runs
     app.on_open_urls(|urls|for u in urls {if pairing::is_link(&u) {let _=OPENED.0.try_send(u);}});

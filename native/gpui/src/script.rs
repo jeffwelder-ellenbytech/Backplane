@@ -119,7 +119,7 @@ impl Backplane {
             // rectangles from that paint are both known (from render they were a frame behind, and an idle window then wrote nothing more:
             // a panel opened by a click showed in the log only at the next unrelated redraw)
             if crate::art::rects_on() { let me = this.clone(); window.on_frame_drawn(move |_, cx| me.update(cx, |v, _| v.drawn_marks()).is_ok()); }
-            window.on_next_frame(move |_, _| metric(started, "first_frame", json!({})));
+            window.on_next_frame(move |_, _| { metric(started, "first_frame", json!({})); crate::selfupdate::opened() }); // the window is up: this build is proven here
             match window.gpu_specs() {
                 Some(g) => metric(started, "gpu", json!({"device": g.device_name, "driver": g.driver_name, "driver_info": g.driver_info, "software": g.is_software_emulated})),
                 None => metric(started, "gpu", json!({"device": null})),

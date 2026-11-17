@@ -28,13 +28,14 @@ Nothing starts the hub directly. The desktop app finds this layout around itself
 
 ## Who updates itself
 
-Only a hub the guard runs from a builds folder (`BACKPLANE_BUILDS`: `builds/<tag>/`, `CURRENT`, `BAD`, `.pins/`). Otherwise the updater says so and does nothing:
+A hub the guard runs from a builds folder (`BACKPLANE_BUILDS`: `builds/<tag>/`, `CURRENT`, `BAD`, `.pins/`), and a desktop app whose install has no guard running because its hub is on another machine. Otherwise the updater says so and does nothing:
 
 | state | when |
 |---|---|
 | `package` | no `BACKPLANE_BUILDS`: a package install or a plain folder; its package manager updates it |
 | `off` | `BACKPLANE_NO_UPDATE=1`, or a copy of a real log (`copy::on`) |
 | `idle` / `checking` / `downloading` / `waiting` / `installing` / `failed` | a managed hub |
+| the app's own row (below) | a desktop app in a guarded install (`builds/<tag>/`, `CURRENT`, the guard at `<prefix>/backplane`) whose `launch.json` names a `url` and no local hub: no guard runs on this machine, so the app keeps its own build (see "A desktop app on another machine's hub") |
 
 The feed is GitHub Releases (`run::FEED`); only the environment (`BACKPLANE_UPDATE_FEED`) can change it, never a setting, because any paired client can write settings. The channel is the setting `update.channel`: `stable` or `beta` (0.14's stored `nightly` reads as `beta`).
 
@@ -84,6 +85,31 @@ The guard takes one request at a time: a second one gets 409 unless the first is
 ## The test key (feature `e2e-trust`)
 
 The update E2E (`test/update/`) needs releases it can sign, and it never signs one with the real key. A hub built with `cargo build --features e2e-trust` also trusts one public key (PEM) from the file `BACKPLANE_E2E_TRUST_KEY` names, and only for releases below `0.1.0` (`rel::E2E_CEILING`), so a leaked test release would offer nothing. The E2E makes a fresh keypair in its private home for each run and deletes it at the end; no private key is committed. Default and release builds have none of this code: the feature's code carries the string `backplane-e2e-trust-enabled`, and `release.yml` fails a build whose `backplane-hub` contains it. A unit test shows a default build refuses a manifest signed by such a key.
+
+## A desktop app on another machine's hub
+
+A desktop app set up to use a hub on another machine (`~/.config/backplane-gpui/launch.json`: `"home": ""`, `"url": "http://HOST:PORT"`) starts no hub, so no guard runs on its machine. Nothing looked at the release feed and nothing moved `CURRENT`: such an install stayed on the build it was installed with, and Settings showed the remote hub's update line, which said nothing about it. The app now keeps its own build, with the hub updater's trust rules and the guard's files, and moves to a new build only where no other app runs and only once that build has opened its window here.
+
+**Who does what.**
+
+- `backplane builds keep --builds <prefix> --running <tag> --channel <c>` (the guard, `native/guard/src/keep.rs`) finds, verifies and stages. It runs the hub's own `update::rel` and `update::run`, compiled into the guard by path as `scopeprobe.rs` already is, so this is the same code and not a copy: the signed manifest under the one compiled-in key, the tag's shape, the channel, `BAD`, the archive's size, sha256 and members, `EXPECT` written from the manifest, and one rename into `builds/<tag>/`. Then it writes `app-update/next` and stops. It never starts or stops a hub, never touches a build that runs, and prunes with the guard's rule (`run::prunable`) while keeping the builds named below. One runs at a time (`app-update/lock`). With a guard running on this prefix (a live `.pins/<port>`) it says `guard` and does nothing, because that guard owns `CURRENT`.
+- The app (`native/gpui/src/selfupdate.rs`, with the rules in `native/guard/src/appkeep.rs`, which both programs compile) does the rest. It runs only in a guarded install whose launch uses a hub on another machine: no `--url`, no `BACKPLANE_HOME`, no local hub this client was started on, and a `url` in launch.json. It never runs under `$APPIMAGE`, `BACKPLANE_HUB_BIN` or `BACKPLANE_NO_UPDATE=1`. A package install has no `builds/` layout, so it never runs there either.
+  - **At launch, before any window** (`appkeep::start`): every app of a prefix holds `<prefix>/clients.lock` shared while it runs. A launch that can hold it alone may move to another build; one that cannot stays where it is, so no build changes under a running app.
+    - A staged build newer than this one, not in `BAD` and present is tried. The launch writes `app-update/trial` (`{tag, from}`) and replaces itself with that build's app (`exec` on Unix, so Backplane.app stays the app macOS launched; started and left on Windows, as the guard's `backplane` starts an app). `CURRENT` still names the old build.
+    - A launch of the build a trial came from means the trial never got to its window. That trial is marked `BAD` ("the app its window never opened") and this build runs. A launch of any third build forgets the trial without blaming it (`CURRENT` was moved by hand meanwhile).
+  - **First frame drawn** (`appkeep::opened`): this build opened its window here. A trial is added to `app-update/good`, becomes `CURRENT` and clears `next`. The build `CURRENT` already names is recorded as good. Then this build's own guard runs `builds keep`, detached, and again every six hours while the app runs.
+- `CURRENT` only ever names a build whose app opened its window on this machine. The launchers (`deploy/mac/launcher.c`, `backplane-app` from install.sh, the Windows guard's `backplane` with no arguments, which the Start-menu entry runs) only read `CURRENT` and run its app, so none of them changed: the switch happens inside the app they start, and every launcher already installed keeps working. A new build that crashes before its window costs one launch: the next launch runs the old build again, marks the new one bad and opens.
+- Pruning keeps `CURRENT`, the newest three good builds (a second app opened before a switch still runs the build `CURRENT` named then), the staged build, both sides of a trial, the running build and anything pinned.
+
+**Why the guard stages and the app switches** (the handoff's two designs). The guard gets the fetch-and-stage step because the trust rules already live in the hub's updater, and the guard can compile the same files with three small dependencies (`ed25519-compact` from the hub's vendor folder, `base64`, `hex`). The app stays free of the updater, and the step runs detached, so it finishes after the window closes. The guard cannot do the switch, because nothing runs it at launch: the launchers run the app directly, and launchers already installed are never rewritten by an update. So the app judges and moves `CURRENT` itself, through `appkeep.rs`, which the guard compiles too (its tests run in the guard's crate). `store::Builds::mark_bad`/`publish` write `BAD` and `CURRENT` through it, so the format has one writer.
+
+**Channel.** This device's own, in `local-settings.json` beside `launch.json` (`app_channel`: `stable` by default, `beta` or `nightly`), set by the chips in its Settings row. The remote hub's `update.channel` is that hub's and does not reach the client as data. The feed comes only from the environment (`BACKPLANE_UPDATE_FEED`), never from a setting, and `BACKPLANE_NO_UPDATE=1` turns all of this off, as for the hub.
+
+**What the person sees.** A desktop client connected to any hub shows its own version beside the hub's, which is labelled "Hub: Backplane v…", on Settings > Network and Settings > About: the two can differ. Where the app is updated by this computer's hub (its guard) or by its package, the Network row says that. Where it keeps its own build, the row reads "This Mac's app: v0.16.0" (or "This computer's app") with "Up to date, checked 14:05", "v0.16.1 is ready: used the next time Backplane opens", "Updated to v0.16.1", "v0.16.2 did not start, so this build stayed", or the check's error. The row offers Check now and the channel chips. The words come from `appkeep::line` over `app-update/status.json`. The hub's own Check now beside it checks this device too. Phones are unaffected.
+
+**A hand install.** On Windows, unpacking a newer zip and choosing Install puts it in `builds/` and, where `CURRENT` names an older build, writes it as `app-update/next`: an app on a remote hub tries it at its next launch, and a guard ignores the file. On Linux and macOS, install.sh run again with no guard running writes `CURRENT` itself, and a pending trial is forgotten, not blamed.
+
+Tests: `appkeep::` and `keep::` in the guard (`cargo test`, no network; the hub's `update::` tests run there too), `selfupdate::` in the client, and `test/update/app-e2e.sh GUARD GPUI` end to end. That test builds A, B and a broken C on a loopback signed feed, with the real client under a private Xvfb: A stages B and stays as it was, a second app leaves the build alone, the next launch runs B and makes it `CURRENT`, C dies at its start and is marked bad, and B keeps running (CI: the `app-update` job).
 
 ## Checking an update from far away
 
