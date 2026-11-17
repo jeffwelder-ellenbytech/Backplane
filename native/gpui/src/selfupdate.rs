@@ -116,7 +116,7 @@ pub fn version() -> String {
 /// own build (a hub on another machine), what `keep` last did, with Check now and its channel; else this computer's hub (its guard), or its package.
 pub fn row(l: &crate::local::Local, page: &str) -> Option<crate::screens::settings::Row> {
     use crate::{i18n::{tf, trs}, screens::settings::{Btn, Row}};
-    let label = tf(if cfg!(target_os = "macos") { "gpui.appupdate.label.mac" } else { "gpui.appupdate.label" }, &[("tag", version().into())]);
+    let label = tf(if cfg!(target_os = "macos") { "gpui.appupdate.label.mac" } else { "gpui.appupdate.label" }, &[("tag", version().trim_start_matches('v').to_string().into())]); // as the hub's own row says its version
     let r = |note: String, buttons: Vec<Btn>| Some(Row { label: label.clone(), note, buttons, local: true, ..Default::default() });
     match (page, here()) {
         /* i18n-ok: drawn through trs */ ("about", _) => r(trs("Updates are under Network."), vec![]),
