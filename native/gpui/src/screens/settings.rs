@@ -487,7 +487,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
 
 /// A row's button pressed: the client's own actions here, a vault Save straight to the hub, anything else the view action it names.
 pub fn on_press(this: &mut Backplane, b2: &Btn, cx: &mut Context<Backplane>) {
-    if super::onboard::press(this, b2, cx) { return; } if let Some(a) = super::hubpick::parse(&b2.action) { super::hubpick::act(this, a, cx); return; } if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } if b2.action == "open-licenses" { if let Some(d) = crate::hub::licenses_dir() { cx.open_with_system(&d); } return; } flush_fields(this); if is_vault_save(b2) { save_vault(this, b2, cx); } else { let _ = this.tx.try_send(press(b2)); } cx.notify();
+    if super::onboard::press(this, b2, cx) { return; } if let Some(a) = super::hubpick::parse(&b2.action) { super::hubpick::act(this, a, cx); return; } if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "update-check" { this.app_check(cx); } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } if b2.action == "open-licenses" { if let Some(d) = crate::hub::licenses_dir() { cx.open_with_system(&d); } return; } flush_fields(this); if is_vault_save(b2) { save_vault(this, b2, cx); } else { let _ = this.tx.try_send(press(b2)); } cx.notify();
 }
 
 /// The dialog while the hub has settings open; None when it has not: a title bar with a close ×, the pages on the left (search above, an icon and a
@@ -510,8 +510,10 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let on_hubs = ui.hubs && !on_acct;
     let on_device = (ui.device || !hub_on) && !on_acct && !on_hubs;
     let c = |n: &str| theme::color(light, n);
-    let rows = parse(settings);
+    let mut rows = parse(settings);
     let on_page = hub_on && !on_device && !on_acct && !on_hubs && matches!(shown(&rows), Shown::Page);
+    // Network and About: this computer's app beside the hub's version (and on Network, what updates it)
+    if on_page && (ui.page == "network" || ui.page == "about") { if let Some(r) = crate::selfupdate::row(local, &ui.page) { let at = crate::selfupdate::row_at(&rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>()); rows.insert(at, r); } }
     let skip = if on_page { 1 } else { 0 };
     let dev_rows = device_rows(local);
     let hub_rows = super::hubpick::rows_on(hub_list, on_home);

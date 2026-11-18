@@ -57,7 +57,8 @@ fn update_row(version: &str, status: &str) -> Value {
     let waiting = serde_json::from_str::<Value>(status).map_or(false, |v| v["state"] == "waiting");
     let mut b = if check { vec![btn("Check now", "update-check", "", false)] } else { vec![] };
     if waiting { b.push(btn("Update now", "update-now", "", false)); }
-    row(&format!("Backplane {version}"), &line, b)
+    // "Hub": a desktop client puts its own version beside this row (native/gpui selfupdate.rs), and the two can differ
+    row(&format!("Hub: Backplane {version}"), &line, b)
 }
 
 fn appearance(st: &State) -> Vec<Value> {
@@ -155,7 +156,7 @@ fn developer(st: &State) -> Vec<Value> {
 fn about(st: &State, info: &Value) -> Vec<Value> {
     let v = VERSION.get().map(String::as_str).unwrap_or("");
     let _ = st;
-    let mut r = vec![row(&format!("Backplane {v}"), "Updates are under Network.", vec![])];
+    let mut r = vec![row(&format!("Hub: Backplane {v}"), "Updates are under Network.", vec![])];
     // what this window's Browser tab is (a desktop client says; a phone says nothing)
     match info["client"]["browser"].as_str() {
         Some("frames") => r.push(row("Browser", "Frame mode: the hub's browser draws each page and this window shows it.", vec![])),

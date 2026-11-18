@@ -40,6 +40,11 @@ mod vt;
 /// What `systemd-run --user --scope` takes here, shared by path with the hub (the hub's own scope, launch.rs).
 #[path = "../../host/src/scopeprobe.rs"]
 mod scopeprobe;
+// this device's app's own updates where no guard runs (a hub on another machine): the rules, shared with the guard's `backplane builds keep`
+#[path = "../../guard/src/appkeep.rs"]
+#[allow(dead_code)]
+mod appkeep;
+mod selfupdate;
 use gpui::{prelude::*, *, actions};
 use serde_json::Value;
 use std::{collections::{HashMap,VecDeque},time::{Duration,Instant}};
@@ -159,6 +164,7 @@ impl Backplane {
                 if id.contains('~') { self.note=crate::i18n::trs("Sent. The thread opens here as soon as that machine has it."); }
                 self.screens.projects.made=Some((id.to_string(),at)); self.adopt_new(cx); } cx.notify(); }
             Event::Data(tag,v) if tag==streamer::TAG => self.streamer_ids(&v,cx),
+            Event::Data(tag,v) if tag=="hubupd" => { selfupdate::hub_said(&v); cx.notify(); }
             Event::Data(tag,v) if tag=="names" => { screens::xprobe::got_names(self,&v); cx.notify(); }
             Event::Data(tag,v) if tag=="xsel" => { screens::xprobe::got_select(self,&v); cx.notify(); }
             Event::Data(tag,v) if tag=="xsel-tap" => { eprintln!("GPUI_LOG {}",serde_json::json!({"event":"xprobe_tap","ok":v["ok"],"kicad":v["kicad"],"found":v["found"],"error":v["error"]})); }
@@ -168,9 +174,10 @@ impl Backplane {
             // the first message of a thread a page's Send made: refused, the text comes back (never merged) and the error shows; taken, it is done
             Event::Rpc("first-message",ok,why)=>{ let text=self.screens.projects.sending.take(); if !ok { self.screens.projects.refused=why; if let Some(t)=text { let now=self.input.read(cx).content.to_string(); if let Some(t)=screens::projects::give_back(t,&now,&mut self.screens.projects.restore) { self.input.update(cx,|i,cx|i.set(t,cx)); } } } cx.notify(); },
             Event::Term(key,pid,b,reset,state)=>self.term_frame(&key,pid,&b,reset,state,cx),
-            Event::Hello=>{self.streamer_hello(cx);let was=std::mem::replace(&mut self.had_hello,true);self.term_rejoin();if was{self.kicad_rejoin(cx);}self.screens.unsent.live=true;self.send_unsent();},
+            Event::Hello=>{self.ask_hub_update(cx);self.streamer_hello(cx);let was=std::mem::replace(&mut self.had_hello,true);self.term_rejoin();if was{self.kicad_rejoin(cx);}self.screens.unsent.live=true;self.send_unsent();},
             Event::Star(v)=>self.star_offer(&v,cx),
             Event::TmNotice(v)=>self.tm_notice(&v,cx),
+            Event::Rpc("hubchk",_,_)=>{cx.spawn(async move|this,cx|{cx.background_executor().timer(Duration::from_secs(20)).await;let _=this.update(cx,|this,cx|this.ask_hub_update(cx));}).detach();},
             Event::Rpc("mgmt",ok,why)=>{self.screens.mgmt.error=if ok{String::new()}else{why};cx.notify();},
             Event::Rpc(tag,ok,why)=>if tag=="term"{if !ok{self.error=format!("Terminal: {why}");}}else if tag=="google"{screens::google::done(self,ok,&why)}else if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag=="fileopen" {if !ok {self.error=why;}} else if tag=="plan" {screens::mgmt_plan::answered(self,ok,&why,cx)} else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
@@ -203,12 +210,30 @@ impl Backplane {
     pub fn light(&self)->bool{self.theme_override.unwrap_or_else(||self.local.light(self.data["theme"]=="light"))}
     /// A press of a `local:<name>` button in the settings dialog: this device's own setting, applied here and kept in the local file; the hub hears nothing.
     pub fn local_press(&mut self,name:&str,value:&str,cx:&mut Context<Self>){
+        if name=="app-check"{self.app_check(cx);return;}
+        if name=="app-restart"{if selfupdate::restart(){quit_later(cx);}return;}
+        if name=="hub-check"{let _=self.tx.try_send(hub::Command::Rpc("update.check".into(),screens::settings::Secret(serde_json::json!({})),"hubchk"));return;}
         if !self.local.set(name,value){return;}
+        if name=="app-channel"{self.local.save();self.app_check(cx);}
         if name=="sidebar-open"{self.sidebar_open=self.local.sidebar_open;}
         if name=="lang"{crate::i18n::set_choice(&self.local.lang);cx.defer(keys::install_menus);}
         if name.starts_with("streamer"){self.local.save();self.streamer_apply(cx);}
         if name.starts_with("shortcut"){let l=self.local.clone();cx.defer(move|cx|bind_all(cx,&l));}
         self.local.save();self.ui_epoch+=1;cx.notify();
+    }
+    /// This device's app looks for a newer build now (selfupdate.rs: Check now in its row, or the hub's Check now beside it), and its row is drawn
+    /// again as the look goes on, until it ends.
+    pub fn app_check(&mut self,cx:&mut Context<Self>){
+        let Some(mut child)=selfupdate::check() else {return};
+        cx.spawn(async move|this,cx|{for _ in 0..1200 {cx.background_executor().timer(Duration::from_millis(500)).await;let done=child.try_wait().map_or(true,|s|s.is_some());if this.update(cx,|_,cx|cx.notify()).is_err()||done{break}}}).detach();
+        cx.notify();
+    }
+    /// The hub's `update.status` (its version and channel: selfupdate.rs follows its channel and compares its version), asked at each connection and
+    /// hourly while the window is open.
+    pub fn ask_hub_update(&mut self,cx:&mut Context<Self>){
+        let _=self.tx.try_send(hub::Command::Rpc("update.status".into(),screens::settings::Secret(serde_json::json!({})),"hubupd"));
+        static HOURLY:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);
+        if !HOURLY.swap(true,std::sync::atomic::Ordering::SeqCst){cx.spawn(async move|this,cx|{loop{cx.background_executor().timer(Duration::from_secs(3600)).await;if this.update(cx,|this,_|{let _=this.tx.try_send(hub::Command::Rpc("update.status".into(),screens::settings::Secret(serde_json::json!({})),"hubupd"));}).is_err(){break}}}).detach();}
     }
     /// The gear: this device's page opens at once (no round trip), and the hub is asked for its pages beside it.
     pub fn open_settings(&mut self,cx:&mut Context<Self>){
@@ -345,6 +370,9 @@ fn main()->anyhow::Result<()> {
     script::metric(started,"process_start",serde_json::json!({}));
     // Windows: an unpacked release asks to install itself where the guard can update it (install.rs); on Install the installed one runs
     #[cfg(windows)] if install::maybe_install(config.pending) { return Ok(()) }
+    // a hub on another machine: this app keeps its own build (selfupdate.rs); a staged build is tried here, before any window, and this process may become it
+    {let saved=launch::load();let env=std::env::var_os("BACKPLANE_HOME").map_or(false,|h|!h.is_empty());
+     selfupdate::at_launch(selfupdate::remote(config.pending,env,hubs::local_target(&hubs::load()).is_some(),&saved.url));}
     let app=Application::new().with_assets(art::Assets);
     // macOS hands a backplane:// link to the app itself, at launch and while it runs
     app.on_open_urls(|urls|for u in urls {if pairing::is_link(&u) {let _=OPENED.0.try_send(u);}});

@@ -23,6 +23,7 @@ jobs:
       gpui: ${{ steps.f.outputs.gpui }}
       browser: ${{ steps.f.outputs.browser }}
       guard: ${{ steps.f.outputs.guard }}
+      appupdate: ${{ steps.f.outputs.appupdate }}
       android: ${{ steps.f.outputs.android }}
       windows: ${{ steps.f.outputs.windows }}
       ios: ${{ steps.f.outputs.ios }}
@@ -48,6 +49,12 @@ jobs:
               - '.github/workflows/ci.yml'
             guard:
               - 'native/guard/**'
+              - '.github/workflows/ci.yml'
+            appupdate:
+              - 'native/guard/**'
+              - 'native/gpui/**'
+              - 'native/host/src/update/**'
+              - 'test/update/app-e2e.sh'
               - '.github/workflows/ci.yml'
             android:
               - 'mobile/android/**'
@@ -112,6 +119,41 @@ jobs:
         run: cargo test --locked
 
   # The hub's tests, split over runners with nextest.
+  # The desktop app's own updates where its hub is on another machine (docs/deploy.md, test/update/app-e2e.sh): the guard built with e2e-trust, the client,
+  # releases A, B and a broken C on a loopback feed signed with a key made for the run, the real client in a private Xvfb with i3 and lavapipe.
+  app-update:
+    needs: changes
+    if: needs.changes.outputs.appupdate == 'true'
+    name: app-update ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@v1
+      - name: system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev \
+            xvfb i3 mesa-vulkan-drivers libvulkan1 libxkbcommon-x11-0 binutils > /dev/null
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/guard
+            native/gpui
+          shared-key: app-update
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: build
+        run: |
+          (cd native/guard && cargo build --locked --features e2e-trust) & a=$!
+          (cd native/gpui && cargo build --locked --profile fast) & b=$!
+          wait $a; ra=$?; wait $b; rb=$?; exit $((ra | rb))
+      - name: e2e
+        run: UPD_DIR=$RUNNER_TEMP bash test/update/app-e2e.sh native/guard/target/debug/backplane native/gpui/target/fast/backplane-gpui
+
   hub:
     needs: changes
     if: needs.changes.outputs.host == 'true'
