@@ -37,12 +37,12 @@ pub struct Local {
     pub streamer: bool, pub streamer_share: bool, pub streamer_apps: bool,
     /// the Backplane KiCad update put off with "Not now": "<version>|<epoch s>" (offered again a day later, or a newer one at once)
     pub kicad_update_later: String,
-    /// The release channel of this device's own app, where it updates itself (a hub on another machine: selfupdate.rs): stable, beta or nightly.
-    /// The hub's `update.channel` is that hub's; this one is this computer's.
+    /// The release channel of this device's own app, where it updates itself (a hub on another machine: selfupdate.rs): "" follows the hub's own
+    /// `update.channel` (the default, so the two move together), or stable, beta or nightly for this computer alone.
     pub app_channel: String,
 }
 impl Default for Local {
-    fn default() -> Self { Local { lang: "auto".into(), theme: "hub".into(), viewer_bg: "auto".into(), viewer_bg_rgb: VIEWER_BG_SWATCHES[0].1, text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0., streamer: false, streamer_share: true, streamer_apps: false, kicad_update_later: String::new(), app_channel: "stable".into() } }
+    fn default() -> Self { Local { lang: "auto".into(), theme: "hub".into(), viewer_bg: "auto".into(), viewer_bg_rgb: VIEWER_BG_SWATCHES[0].1, text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0., streamer: false, streamer_share: true, streamer_apps: false, kicad_update_later: String::new(), app_channel: String::new() } }
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -63,7 +63,7 @@ impl Local {
         l.text_pct = l.text_pct.clamp(TEXT_PCT.0, TEXT_PCT.1); l.sidebar_px = l.sidebar_px.clamp(SIDEBAR_PX.0, SIDEBAR_PX.1);
         if l.viewer_px != 0 { l.viewer_px = l.viewer_px.clamp(VIEWER_PX.0, VIEWER_PX.1); }
         if !crate::i18n::CHOICES.iter().any(|(k, _)| *k == l.lang) { l.lang = "auto".into() }
-        if !APP_CHANNELS.contains(&l.app_channel.as_str()) { l.app_channel = "stable".into() }
+        if !l.app_channel.is_empty() && !APP_CHANNELS.contains(&l.app_channel.as_str()) { l.app_channel = String::new() }
         if !THEMES.iter().any(|(k, _)| *k == l.theme) { l.theme = "hub".into() }
         if !VIEWER_BGS.iter().any(|(k, _)| *k == l.viewer_bg) { l.viewer_bg = "auto".into() }
         l.viewer_bg_rgb &= 0xff_ffff;
@@ -108,7 +108,7 @@ impl Local {
             "streamer-share" => self.streamer_share = value == "on",
             "streamer-apps" => self.streamer_apps = value == "on",
             "default-view" if VIEWS.iter().any(|(k, _)| *k == value) => self.default_view = value.into(),
-            "app-channel" if APP_CHANNELS.contains(&value) => self.app_channel = value.into(),
+            "app-channel" if value.is_empty() || APP_CHANNELS.contains(&value) => self.app_channel = value.into(),
             "shortcut" => { // "<action>\u{1f}<key>", or just "<action>" to take the next key in the list
                 let (a, k) = value.split_once('\u{1f}').unwrap_or((value, ""));
                 if !crate::keys::rebindable(a) { return false }
